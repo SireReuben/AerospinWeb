@@ -22,30 +22,6 @@ PORT = 8080
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-class SerialManager:
-    def __init__(self, port, baud):
-        self.port = port
-        self.baud = baud
-        self.instance = None
-        self.lock = asyncio.Lock()
-
-    async def get_instance(self):
-        async with self.lock:
-            if not self.instance or not self.instance.is_open:
-                try:
-                    self.instance = serial.Serial(self.port, self.baud, timeout=0.1)
-                    logging.info("Serial port initialized")
-                except serial.SerialException as e:
-                    logging.error(f"Failed to open serial port: {e}")
-                    raise
-            return self.instance
-
-    async def close(self):
-        async with self.lock:
-            if self.instance and self.instance.is_open:
-                self.instance.close()
-                logging.info("Serial port closed")
-
 
 # Global variables
 data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
