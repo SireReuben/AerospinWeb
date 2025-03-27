@@ -1,4 +1,3 @@
-import serial
 import json
 import asyncio
 import logging
@@ -13,35 +12,32 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
-# Serial port configuration
-#SERIAL_PORT = '/dev/cu.usbserial-21130'  # Update this to your port
-BAUD_RATE = 115200
+# Configuration constants
 PORT = 8080
+MAX_HISTORY = 20  # Configurable history limit
+VALID_DEVICE_STATES = ["disconnected", "ready", "running", "error", "waiting", "stopped"]
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-
-
 # Global variables
 data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
-history = {"temperature": [], "humidity": [], "speed": [], "timestamps": [], "remaining": []}
-#serial_manager = SerialManager(SERIAL_PORT, BAUD_RATE)
-system_ready = False
+history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
 data_received = False
-auth_code = None
-runtime = None
 device_state = "disconnected"
 session_data = []
 latest_pdf = None
-
+auth_code = None
+runtime = None
 
 def generate_pdf(session_data):
+    """Generate a PDF report from the session data."""
     filename = f"aerospin_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
     doc = SimpleDocTemplate(filename, pagesize=letter)
     styles = getSampleStyleSheet()
     elements = []
 
+    # Add title and timestamp
     elements.append(Paragraph("Aerospin Session Report", styles['Title']))
     elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
     elements.append(Spacer(1, 12))
@@ -51,12 +47,14 @@ def generate_pdf(session_data):
         doc.build(elements)
         return filename
 
+    # Extract data for charts and tables
     timestamps = [entry["timestamp"] for entry in session_data]
     temperatures = [entry["temperature"] for entry in session_data]
     humidities = [entry["humidity"] for entry in session_data]
     speeds = [entry["speed"] for entry in session_data]
     remainings = [entry["remaining"] for entry in session_data]
 
+    # Add summary table
     summary_data = [
         ["Metric", "Minimum", "Maximum", "Average"],
         ["Temperature (°C)", f"{min(temperatures):.1f}", f"{max(temperatures):.1f}", f"{np.mean(temperatures):.1f}"],
@@ -64,6 +62,7 @@ def generate_pdf(session_data):
         ["Speed (%)", f"{min(speeds)}", f"{max(speeds)}", f"{np.mean(speeds):.1f}"],
         ["Time Remaining (s)", f"{min(remainings)}", f"{max(remainings)}", f"{np.mean(remainings):.1f}"]
     ]
+    
     summary_table = Table(summary_data)
     summary_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
@@ -73,10 +72,12 @@ def generate_pdf(session_data):
         ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
         ('GRID', (0, 0), (-1, -1), 1, colors.black)
     ]))
+    
     elements.append(Paragraph("Summary Statistics", styles['Heading2']))
     elements.append(summary_table)
     elements.append(Spacer(1, 12))
 
+    # Generate charts
     plt.figure(figsize=(10, 8))
     plt.subplot(4, 1, 1)
     plt.plot(timestamps, temperatures, label='Temperature', color='red')
@@ -119,6 +120,7 @@ def generate_pdf(session_data):
     elements.append(plt_img)
     plt.close()
 
+    # Add detailed data table
     table_data = [["Timestamp", "Temperature (°C)", "Humidity (%)", "Speed (%)", "Time Remaining (s)"]]
     for entry in session_data:
         table_data.append([
@@ -141,6 +143,7 @@ def generate_pdf(session_data):
         ('GRID', (0, 0), (-1, -1), 1, colors.black),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
     ]))
+    
     elements.append(Paragraph("Detailed Session Data", styles['Heading2']))
     elements.append(table)
 
@@ -148,7 +151,158 @@ def generate_pdf(session_data):
     logging.info(f"PDF generated: {filename}")
     return filename
 
+async def handle_data(request):
+    """Handle HTTP data requests with improved validation and state management."""
+    global data, history, device_state, data_received, session_data
+    
+    if request.method == "POST":
+        try:
+            post_data = await request.json()
+            if post_data.get("status") == "data":
+                # Validate and update sensor data
+                required_fields = ['temperature', 'humidity', 'speed', 'remaining']
+                if all(field in post_data for field in required_fields):
+                    data_received = True
+                    device_state = "running"
+                    
+                    # Update current readings
+                    data.update({field: post_data[field] for field in required_fields})
+                    
+                    # Maintain session history
+                    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+                    session_data.append({
+                        "timestamp": timestamp,
+                        **{k: post_data[k] for k in required_fields}
+                    })
+                    
+                    # Update rolling history (last MAX_HISTORY entries)
+                    for key in data:
+                        history[key].append(data[key])
+                        history[key] = history[key][-MAX_HISTORY:]
+                    history["timestamps"].append(timestamp)
+                    history["timestamps"] = history["timestamps"][-MAX_HISTORY:]
+                    
+                    logging.info(f"Received valid sensor data: {post_data}")
+                    return web.json_response({"status": "success"})
+                
+                logging.warning("Missing fields in POST data")
+                return web.json_response({"error": "Invalid data format"}, status=400)
+                
+        except json.JSONDecodeError:
+            logging.error("Invalid JSON received")
+            return web.json_response({"error": "Invalid JSON"}, status=400)
+        except Exception as e:
+            logging.error(f"Error processing data: {e}")
+            return web.json_response({"error": "Internal server error"}, status=500)
+    
+    # Return current state for GET requests
+    return web.json_response({
+        "system_status": device_state,
+        "current_readings": data,
+        "data_received": data_received,
+        "history": history,
+        "history_length": len(history["timestamps"])
+    })
 
+async def handle_setup(request):
+    """Handle device setup requests with validation."""
+    global auth_code, runtime, device_state
+    
+    try:
+        post_data = await request.json()
+        logging.debug(f"Received setup data: {post_data}")
+        
+        auth_code = post_data.get("authCode")
+        runtime = post_data.get("runtime")
+        
+        if not (1 <= auth_code <= 10) or runtime < 1:
+            return web.json_response({"error": "Invalid auth code or runtime"}, status=400)
+            
+        device_state = "waiting"
+        logging.info(f"Setup complete - Auth Code: {auth_code}, Runtime: {runtime}")
+        return web.json_response({"status": "waiting"})
+        
+    except json.JSONDecodeError:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+    except Exception as e:
+        logging.error(f"Error in setup: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+async def handle_stop(request):
+    """Handle system stop requests."""
+    global device_state, session_data, latest_pdf
+    
+    try:
+        device_state = "stopped"
+        
+        # Generate PDF report when stopped
+        if session_data:
+            latest_pdf = generate_pdf(session_data)
+            session_data = []  # Clear session data after generating report
+            
+        logging.info("System stopped")
+        return web.json_response({"status": "stopped"})
+        
+    except Exception as e:
+        logging.error(f"Error stopping system: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+async def handle_pdf_download(request):
+    """Handle PDF download requests."""
+    global latest_pdf, session_data
+    
+    try:
+        if not latest_pdf and session_data:
+            latest_pdf = generate_pdf(session_data)
+            
+        if not latest_pdf:
+            return web.json_response({"error": "No PDF available"}, status=404)
+            
+        return web.FileResponse(latest_pdf)
+        
+    except Exception as e:
+        logging.error(f"Error serving PDF: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+async def handle_root(request):
+    """Serve the dashboard HTML."""
+    return web.Response(text=HTML_CONTENT, content_type='text/html')
+
+async def init_app():
+    """Initialize the web application with routes."""
+    app = web.Application()
+    
+    # Configure routes
+    app.router.add_get('/', handle_root)
+    app.router.add_route('*', '/data', handle_data)
+    app.router.add_post('/setup', handle_setup)
+    app.router.add_post('/stop', handle_stop)
+    app.router.add_get('/download_pdf', handle_pdf_download)
+    
+    return app
+
+async def main():
+    """Main application entry point."""
+    try:
+        app = await init_app()
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', PORT)
+        await site.start()
+        
+        logging.info(f"Server started at http://localhost:{PORT}")
+        while True:
+            await asyncio.sleep(3600)  # Keep server running
+            
+    except Exception as e:
+        logging.error(f"Server error: {e}")
+    finally:
+        await runner.cleanup()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+# HTML content remains unchanged from original
 HTML_CONTENT = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -622,154 +776,3 @@ HTML_CONTENT = '''
 </body>
 </html>
 '''
-
-
-async def read_serial_async():
-    global data, history, system_ready, data_received, device_state, auth_code, runtime, session_data
-    while True:
-        try:
-            serial_instance = await serial_manager.get_instance()
-            line = await asyncio.to_thread(serial_instance.readline)
-            if line:
-                line_str = line.decode('utf-8').strip()
-                logging.info(f"Received from ESP8266: {line_str}")
-                try:
-                    new_data = json.loads(line_str)
-                    status = new_data.get("status")
-
-                    if status == "arduino_ready":
-                        await asyncio.to_thread(serial_instance.write, '{"status":"ready"}\n'.encode())
-                        logging.info("Sent ready signal to ESP8266")
-                    elif status == "ready_ack":
-                        system_ready = True
-                        device_state = "waiting_code"
-                        logging.info("System ready, waiting for auth code")
-                    elif status == "waiting":
-                        device_state = "waiting"
-                        logging.info("Device in waiting state")
-                    elif status == "data":
-                        data_received = True
-                        device_state = "running"
-                        data["temperature"] = new_data["temperature"]
-                        data["humidity"] = new_data["humidity"]
-                        data["speed"] = new_data["speed"]
-                        data["remaining"] = new_data["remaining"]
-                        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-                        session_data.append({
-                            "timestamp": timestamp,
-                            "temperature": data["temperature"],
-                            "humidity": data["humidity"],
-                            "speed": data["speed"],
-                            "remaining": data["remaining"]
-                        })
-                        for key in data:
-                            history[key].append(data[key])
-                        history["timestamps"].append(timestamp)
-                        if len(history["timestamps"]) > 20:
-                            for key in history:
-                                history[key] = history[key][-20:]
-                        logging.info(f"Data updated: {data}")
-                    elif status == "stopped":
-                        device_state = "stopped"
-                        data_received = False
-                        if session_data:
-                            global latest_pdf
-                            latest_pdf = generate_pdf(session_data)
-                        logging.info("Device stopped")
-                except json.JSONDecodeError:
-                    logging.warning(f"Invalid JSON received: {line_str}")
-        except serial.SerialException as e:
-            logging.error(f"Serial error: {e}")
-            device_state = "disconnected"
-            system_ready = False
-            await asyncio.sleep(1)
-        await asyncio.sleep(0.01)
-
-
-async def handle_data(request):
-    return web.json_response({
-        "temperature": data["temperature"],
-        "humidity": data["humidity"],
-        "speed": data["speed"],
-        "remaining": data["remaining"],
-        "history": history,
-        "data_received": data_received,
-        "state": device_state
-    })
-
-
-async def handle_setup(request):
-    global auth_code, runtime
-    try:
-        post_data = await request.json()
-        logging.debug(f"Received setup data: {post_data}")  # Add this
-        auth_code = post_data.get("authCode")
-        runtime = post_data.get("runtime")
-        if not (1 <= auth_code <= 10) or runtime < 1:
-            return web.json_response({"error": "Invalid auth code or runtime"}, status=400)
-        serial_instance = await serial_manager.get_instance()
-        await asyncio.to_thread(serial_instance.write, json.dumps(
-            {"status": "auth_code", "code": auth_code, "runtime": runtime}).encode() + b'\n')
-        logging.info(f"Sent auth code {auth_code} and runtime {runtime} to ESP8266")
-        return web.json_response({"status": "waiting"})
-    except Exception as e:
-        logging.error(f"Error in handle_setup: {e}")
-        return web.json_response({"error": str(e)}, status=500)
-
-
-async def handle_start(request):
-    try:
-        serial_instance = await serial_manager.get_instance()
-        await asyncio.to_thread(serial_instance.write, '{"status":"start"}\n'.encode())
-        logging.info("Sent start command to ESP8266")
-        return web.json_response({"status": "running"})
-    except Exception as e:
-        logging.error(f"Error in handle_start: {e}")
-        return web.json_response({"error": str(e)}, status=500)
-
-
-async def handle_stop(request):
-    global device_state, session_data, latest_pdf
-    try:
-        serial_instance = await serial_manager.get_instance()
-        await asyncio.to_thread(serial_instance.write, '{"status":"stop"}\n'.encode())
-        logging.info("Sent stop command to ESP8266")
-
-        # Generate PDF immediately when stopped
-        if session_data:
-            latest_pdf = generate_pdf(session_data)
-
-        device_state = "disconnected"
-        session_data = []
-        return web.json_response({"status": "stopped"})
-    except Exception as e:
-        logging.error(f"Error in handle_stop: {e}")
-        return web.json_response({"error": str(e)}, status=500)
-
-
-async def handle_pdf_download(request):
-    global latest_pdf, session_data
-    if not latest_pdf and session_data:
-        latest_pdf = generate_pdf(session_data)
-    if not latest_pdf:
-        return web.json_response({"error": "No PDF available"}, status=404)
-    return web.FileResponse(latest_pdf)
-
-
-async def init_app():
-    app = web.Application()
-    app.router.add_get('/', lambda r: web.Response(text=HTML_CONTENT, content_type='text/html'))
-    app.router.add_get('/data', handle_data)
-    app.router.add_post('/setup', handle_setup)
-    app.router.add_post('/start', handle_start)
-    app.router.add_post('/stop', handle_stop)
-    app.router.add_get('/download_pdf', handle_pdf_download)
-    app.router.add_route('GET', '/data', handle_data)
-    app.router.add_route('POST', '/data', handle_data)
-
-    return app
-
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
