@@ -26,7 +26,6 @@ history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "tim
 data_received = False
 device_state = "disconnected"
 session_data = []
-latest_pdf = None
 auth_code = None
 runtime = None
 
@@ -146,6 +145,9 @@ def generate_pdf(session_data):
     logging.info(f"PDF generated: {filename}")
     return filename
 
+# [HTML_CONTENT remains unchanged except for the JavaScript part below]
+
+# Updated JavaScript within HTML_CONTENT
 HTML_CONTENT = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -473,7 +475,6 @@ HTML_CONTENT = '''
     </div>
     <script>
         let tempChart, humidChart, speedChart, remainingChart;
-        let hasDownloaded = false;
         let previousState = "disconnected";
 
         function initCharts() {
@@ -706,7 +707,6 @@ HTML_CONTENT = '''
                     a.click();
                     a.remove();
                     window.URL.revokeObjectURL(url);
-                    hasDownloaded = true;
                 } else {
                     alert('No report available.');
                 }
@@ -722,7 +722,6 @@ HTML_CONTENT = '''
                     method: 'POST'
                 });
                 if (response.ok) {
-                    hasDownloaded = false;
                     document.getElementById('submitSetup').disabled = false;
                     fetchData();
                 } else {
@@ -764,10 +763,6 @@ HTML_CONTENT = '''
                     (currentState === 'stopped' && data.history.timestamps.length > 0) ? 'block' : 'none';
                 document.getElementById('startNewSession').style.display = 
                     (currentState === 'stopped' && data.history.timestamps.length > 0) ? 'block' : 'none';
-
-                if (currentState === 'stopped' && previousState !== 'stopped' && data.history.timestamps.length > 0 && !hasDownloaded) {
-                    await downloadPdf();
-                }
 
                 previousState = currentState;
 
@@ -895,13 +890,10 @@ async def handle_setup(request):
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_stop(request):
-    global device_state, session_data, latest_pdf, auth_code, runtime, data, history, data_received
+    global device_state, session_data, auth_code, runtime, data, history, data_received
     
     try:
         device_state = "disconnected"
-        if session_data:
-            latest_pdf = generate_pdf(session_data)
-            session_data = []
         auth_code = None
         runtime = None
         data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
@@ -915,12 +907,11 @@ async def handle_stop(request):
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_reset(request):
-    global device_state, session_data, latest_pdf, auth_code, runtime, data, history, data_received
+    global device_state, session_data, auth_code, runtime, data, history, data_received
     
     try:
         device_state = "disconnected"
         session_data = []
-        latest_pdf = None
         auth_code = None
         runtime = None
         data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
@@ -934,17 +925,15 @@ async def handle_reset(request):
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_pdf_download(request):
-    global latest_pdf, session_data
+    global session_data
     
     try:
-        if not latest_pdf or not os.path.exists(latest_pdf):
-            if session_data:
-                latest_pdf = generate_pdf(session_data)
-            else:
-                logging.warning("No PDF or session data available for download")
-                return web.json_response({"error": "No PDF available"}, status=404)
+        if not session_data:
+            logging.warning("No session data available for PDF download")
+            return web.json_response({"error": "No session data available"}, status=404)
             
-        response = web.FileResponse(latest_pdf)
+        pdf_filename = generate_pdf(session_data)
+        response = web.FileResponse(pdf_filename)
         return response
         
     except Exception as e:
