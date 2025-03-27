@@ -13,7 +13,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 # Configuration constants
-PORT = 8080
+PORT = int(os.environ.get("PORT", 10000))  # Use Render's assigned port
 MAX_HISTORY = 20  # Configurable history limit
 VALID_DEVICE_STATES = ["disconnected", "ready", "running", "error", "waiting", "stopped"]
 
