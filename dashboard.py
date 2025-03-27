@@ -50,7 +50,7 @@ class SerialManager:
 # Global variables
 data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
 history = {"temperature": [], "humidity": [], "speed": [], "timestamps": [], "remaining": []}
-serial_manager = SerialManager(SERIAL_PORT, BAUD_RATE)
+#serial_manager = SerialManager(SERIAL_PORT, BAUD_RATE)
 system_ready = False
 data_received = False
 auth_code = None
@@ -795,7 +795,7 @@ async def main():
     global serial_manager
     try:
         await serial_manager.get_instance()
-        asyncio.create_task(read_serial_async())
+        #asyncio.create_task(read_serial_async())
         app = await init_app()
         runner = web.AppRunner(app)
         await runner.setup()
