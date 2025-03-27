@@ -159,277 +159,252 @@ HTML_CONTENT = '''
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
     <style>
         :root {
-    --primary: #2c5282;
-    --secondary: #1a365d;
-    --accent: #63b3ed;
-    --warning: #e53e3e;
-    --success: #38a169;
-    --background: #f0f4f8;
-    --card-bg: #ffffff;
-    --text: #2d3748;
-    --text-secondary: #718096;
-    --border: #e2e8f0;
-    --shadow: rgba(0, 0, 0, 0.1);
-}
-
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
-
-* {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-}
-
-body {
-    background: var(--background);
-    color: var(--text);
-    font-family: 'Inter', 'Roboto', sans-serif;
-    margin: 0;
-    padding: 30px;
-    line-height: 1.6;
-}
-
-.container {
-    width: 100%;
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 0 15px;
-}
-
-.dashboard {
-    background: var(--card-bg);
-    border-radius: 16px;
-    padding: 32px;
-    box-shadow: 
-        0 10px 25px var(--shadow),
-        0 5px 10px rgba(0, 0, 0, 0.05);
-    border: 1px solid var(--border);
-    max-width: 1200px;
-    margin: 0 auto;
-}
-
-.row {
-    display: flex;
-    flex-wrap: wrap;
-    margin: 0 -15px;
-}
-
-.col-md-3 {
-    flex: 0 0 25%;
-    max-width: 25%;
-    padding: 0 15px;
-}
-
-.col-md-4 {
-    flex: 0 0 33.333333%;
-    max-width: 33.333333%;
-    padding: 0 15px;
-}
-
-.col-md-12 {
-    flex: 0 0 100%;
-    max-width: 100%;
-    padding: 0 15px;
-}
-
-.header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 32px;
-    padding-bottom: 24px;
-    border-bottom: 2px solid var(--border);
-}
-
-.header h1 {
-    font-size: 32px;
-    font-weight: 800;
-    margin: 0;
-    color: var(--primary);
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.header h1 i {
-    color: var(--accent);
-    margin-right: 10px;
-}
-
-.status-badge {
-    background: var(--accent);
-    color: white;
-    padding: 8px 18px;
-    border-radius: 24px;
-    font-weight: 600;
-    font-size: 14px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
-
-.status-badge.active {
-    background: var(--success);
-}
-
-.metric-card {
-    background: var(--card-bg);
-    border-radius: 12px;
-    padding: 24px;
-    border: 1px solid var(--border);
-    transition: all 0.3s ease;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
-    text-align: center;
-    margin-bottom: 24px;
-}
-
-.metric-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
-}
-
-.metric-title {
-    font-size: 15px;
-    color: var(--text-secondary);
-    font-weight: 600;
-    margin-bottom: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.metric-value {
-    font-size: 36px;
-    font-weight: 700;
-    color: var(--primary);
-    line-height: 1.2;
-}
-
-.chart-container {
-    background: var(--card-bg);
-    border-radius: 12px;
-    padding: 24px;
-    border: 1px solid var(--border);
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
-    margin-bottom: 24px;
-}
-
-.control-card {
-    background: var(--card-bg);
-    border-radius: 12px;
-    padding: 24px;
-    border: 1px solid var(--border);
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
-}
-
-.control-card h4 {
-    color: var(--primary);
-    font-weight: 700;
-    margin-bottom: 20px;
-    border-bottom: 2px solid var(--border);
-    padding-bottom: 12px;
-}
-
-.form-label {
-    display: block;
-    margin-bottom: 8px;
-    font-weight: 600;
-    color: var(--text-secondary);
-}
-
-.form-control {
-    width: 100%;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    padding: 12px;
-    font-size: 15px;
-    margin-bottom: 16px;
-    transition: all 0.3s ease;
-}
-
-.form-control:focus {
-    border-color: var(--primary);
-    outline: none;
-    box-shadow: 0 0 0 3px rgba(44, 82, 130, 0.2);
-}
-
-.btn {
-    display: inline-block;
-    font-weight: 600;
-    text-align: center;
-    vertical-align: middle;
-    user-select: none;
-    border: 1px solid transparent;
-    padding: 12px 24px;
-    font-size: 15px;
-    border-radius: 8px;
-    transition: all 0.3s ease;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 12px;
-    width: 100%;
-}
-
-.btn:hover {
-    transform: translateY(-2px);
-}
-
-.btn-primary {
-    background-color: var(--primary);
-    border-color: var(--primary);
-    color: white;
-}
-
-.btn-primary:hover {
-    background-color: var(--secondary);
-    border-color: var(--secondary);
-}
-
-.btn-danger {
-    background-color: var(--warning);
-    border-color: var(--warning);
-    color: white;
-}
-
-.btn-danger:hover {
-    background-color: #c53030;
-    border-color: #c53030;
-}
-
-.btn-success {
-    background-color: var(--success);
-    border-color: var(--success);
-    color: white;
-}
-
-.btn-success:hover {
-    background-color: #2f855a;
-    border-color: #2f855a;
-}
-
-@media (max-width: 768px) {
-    .col-md-3, .col-md-4, .col-md-12 {
-        flex: 0 0 100%;
-        max-width: 100%;
-    }
-
-    .dashboard {
-        padding: 20px;
-    }
-    
-    .header {
-        flex-direction: column;
-        text-align: center;
-    }
-    
-    .header h1 {
-        margin-bottom: 15px;
-        font-size: 24px;
-    }
-    
-    .metric-card, .chart-container, .control-card {
-        margin-bottom: 15px;
-    }
-}
+            --primary: #4361ee;
+            --secondary: #3a0ca3;
+            --accent: #4cc9f0;
+            --warning: #f72585;
+            --success: #4ade80;
+            --background: #111827;
+            --card-bg: #1f2937;
+            --text: #f9fafb;
+            --text-secondary: #9ca3af;
+            --border: #374151;
+        }
+        body {
+            background: var(--background);
+            color: var(--text);
+            font-family: 'Roboto', sans-serif;
+            margin: 0;
+            padding: 30px;
+            line-height: 1.6;
+        }
+        .container { 
+            max-width: 1300px; 
+            padding: 20px; 
+        }
+        .dashboard {
+            border-radius: 16px;
+            padding: 24px;
+            background: linear-gradient(135deg, 
+                rgba(31, 41, 55, 0.95), 
+                rgba(17, 24, 39, 0.98));
+            border: 1px solid rgba(55, 65, 81, 0.5);
+            box-shadow: 
+                0 15px 35px rgba(0, 0, 0, 0.3), 
+                0 5px 15px rgba(0, 0, 0, 0.2);
+            transition: all 0.3s ease;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .header h1 i { 
+            color: var(--accent); 
+            transition: transform 0.3s ease;
+        }
+        .header h1 i:hover {
+            transform: rotate(15deg) scale(1.1);
+        }
+        .status-badge {
+            background: rgba(67, 97, 238, 0.15);
+            color: var(--accent);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.3s ease;
+        }
+        .status-badge:hover {
+            transform: scale(1.05);
+            background: rgba(67, 97, 238, 0.25);
+        }
+        .status-badge.active {
+            background: rgba(74, 222, 128, 0.15);
+            color: var(--success);
+        }
+        .metric-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 24px;
+            border: 1px solid var(--border);
+            transition: 
+                transform 0.4s cubic-bezier(0.25, 0.1, 0.25, 1),
+                box-shadow 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
+            position: relative;
+            overflow: hidden;
+        }
+        .metric-card::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: linear-gradient(
+                45deg, 
+                transparent, 
+                rgba(255,255,255,0.05), 
+                transparent
+            );
+            transform: rotate(-45deg);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        .metric-card:hover::before {
+            opacity: 1;
+        }
+        .metric-card:hover {
+            transform: translateY(-8px) scale(1.02);
+            box-shadow: 
+                0 15px 30px rgba(0, 0, 0, 0.3), 
+                0 0 20px rgba(67, 97, 238, 0.2);
+        }
+        .metric-title {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+        .metric-value {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 4px;
+            letter-spacing: -1px;
+        }
+        .metric-unit {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-left: 5px;
+        }
+        .chart-container {
+            position: relative;
+            height: 220px;
+            margin-bottom: 24px;
+            background: rgba(31, 41, 55, 0.6);
+            border-radius: 12px;
+            padding: 16px;
+            border: 1px solid var(--border);
+            backdrop-filter: blur(10px);
+            transition: 
+                transform 0.4s cubic-bezier(0.25, 0.1, 0.25, 1),
+                box-shadow 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
+        }
+        .chart-container:hover {
+            transform: translateY(-8px) scale(1.02);
+            box-shadow: 
+                0 15px 30px rgba(0, 0, 0, 0.3), 
+                0 0 20px rgba(67, 97, 238, 0.2);
+        }
+        .control-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 24px;
+            border: 1px solid var(--border);
+            transition: all 0.3s ease;
+        }
+        .control-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 
+                0 10px 20px rgba(0, 0, 0, 0.2);
+        }
+        .btn-primary { 
+            background-color: var(--primary); 
+            border-color: var(--primary); 
+            border-radius: 25px;
+            padding: 10px 20px;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            transition: 
+                background-color 0.3s ease,
+                transform 0.3s ease,
+                box-shadow 0.3s ease;
+        }
+        .btn-primary:hover {
+            background-color: var(--secondary);
+            border-color: var(--secondary);
+            transform: translateY(-3px);
+            box-shadow: 0 7px 14px rgba(0, 0, 0, 0.25);
+        }
+        .btn-danger { 
+            background-color: var(--warning); 
+            border-color: var(--warning); 
+            border-radius: 25px;
+            padding: 10px 20px;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            transition: 
+                background-color 0.3s ease,
+                transform 0.3s ease,
+                box-shadow 0.3s ease;
+        }
+        .btn-danger:hover {
+            background-color: #d3165e;
+            border-color: #d3165e;
+            transform: translateY(-3px);
+            box-shadow: 0 7px 14px rgba(0, 0, 0, 0.25);
+        }
+        .btn-success { 
+            background-color: var(--success); 
+            border-color: var(--success); 
+            border-radius: 25px;
+            padding: 10px 20px;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            transition: 
+                background-color 0.3s ease,
+                transform 0.3s ease,
+                box-shadow 0.3s ease;
+        }
+        .btn-success:hover {
+            background-color: #38b260;
+            border-color: #38b260;
+            transform: translateY(-3px);
+            box-shadow: 0 7px 14px rgba(0, 0, 0, 0.25);
+        }
+        .form-control {
+            background-color: var(--background);
+            color: var(--text);
+            border-color: var(--border);
+            transition: all 0.3s ease;
+        }
+        .form-control:focus {
+            background-color: var(--background);
+            color: var(--text);
+            border-color: var(--primary);
+            outline: none;
+            box-shadow: 
+                0 0 0 3px rgba(67, 97, 238, 0.3),
+                0 0 0 1px rgba(67, 97, 238, 0.8);
+        }
+        @media (max-width: 768px) {
+            .metric-card, .chart-container {
+                margin-bottom: 15px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -437,103 +412,230 @@ body {
         <div class="dashboard">
             <div class="header">
                 <h1><i class="ri-dashboard-3-line"></i> Aerospin Control Center</h1>
-                <div id="systemStatus" class="status-badge">Disconnected</div>
+                <div id="systemStatus" class="status-badge"><i class="ri-focus-3-line"></i> Disconnected</div>
             </div>
-            <div class="row g-4">
-                <div class="col-md-3"><div class="metric-card">
-                    <div class="metric-title">Temperature</div>
-                    <div id="temperature" class="metric-value">0°C</div>
-                </div></div>
-                <div class="col-md-3"><div class="metric-card">
-                    <div class="metric-title">Humidity</div>
-                    <div id="humidity" class="metric-value">0%</div>
-                </div></div>
-                <div class="col-md-3"><div class="metric-card">
-                    <div class="metric-title">Speed</div>
-                    <div id="speed" class="metric-value">0%</div>
-                </div></div>
-                <div class="col-md-3"><div class="metric-card">
-                    <div class="metric-title">Time Remaining</div>
-                    <div id="remaining" class="metric-value">0s</div>
-                </div></div>
-            </div>
-            <div class="row g-4 mt-4">
-                <div class="col-md-12"><div class="chart-container">
-                    <canvas id="mainChart"></canvas>
-                </div></div>
-            </div>
-            <div class="row g-4 mt-4">
-                <div class="col-md-4"><div class="control-card">
-                    <h4 class="mb-3">Control Panel</h4>
-                    <div class="mb-3">
-                        <label for="authCode" class="form-label">Auth Code (100-999)</label>
-                        <input type="number" id="authCode" min="100" max="999" class="form-control" required>
+            <div class="row">
+                <div class="col-md-3">
+                    <div class="metric-card temperature">
+                        <div class="metric-title"><i class="ri-temp-hot-line"></i> Temperature</div>
+                        <div id="temperature" class="metric-value">0<span class="metric-unit">°C</span></div>
                     </div>
-                    <div class="mb-3">
-                        <label for="runtime" class="form-label">Runtime (seconds)</label>
-                        <input type="number" id="runtime" min="1" class="form-control" required>
+                </div>
+                <div class="col-md-3">
+                    <div class="metric-card humidity">
+                        <div class="metric-title"><i class="ri-drop-line"></i> Humidity</div>
+                        <div id="humidity" class="metric-value">0<span class="metric-unit">%</span></div>
                     </div>
-                    <button id="submitSetup" class="btn btn-primary w-100">Configure System</button>
-                    <button id="stopButton" class="btn btn-danger w-100 mt-2" style="display: none;">Stop System</button>
-                    <button id="downloadPdf" class="btn btn-primary w-100 mt-2" style="display: none;">Download Report</button>
-                    <button id="startNewSession" class="btn btn-success w-100 mt-2" style="display: none;">New Session</button>
-                </div></div>
+                </div>
+                <div class="col-md-3">
+                    <div class="metric-card speed">
+                        <div class="metric-title"><i class="ri-speed-line"></i> Speed</div>
+                        <div id="speed" class="metric-value">0<span class="metric-unit">%</span></div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="metric-card remaining">
+                        <div class="metric-title"><i class="ri-time-line"></i> Time Remaining</div>
+                        <div id="remaining" class="metric-value">0<span class="metric-unit">s</span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-3"><div class="chart-container"><canvas id="tempChart"></canvas></div></div>
+                <div class="col-md-3"><div class="chart-container"><canvas id="humidChart"></canvas></div></div>
+                <div class="col-md-3"><div class="chart-container"><canvas id="speedChart"></canvas></div></div>
+                <div class="col-md-3"><div class="chart-container"><canvas id="remainingChart"></canvas></div></div>
+            </div>
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="control-card">
+                        <h4 class="mb-3">Control Panel</h4>
+                        <div class="mb-3">
+                            <label for="authCode" class="form-label">Auth Code (100-999)</label>
+                            <input type="number" id="authCode" min="100" max="999" class="form-control" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="runtime" class="form-label">Runtime (seconds)</label>
+                            <input type="number" id="runtime" min="1" class="form-control" required>
+                        </div>
+                        <button id="submitSetup" class="btn btn-primary w-100">Configure System</button>
+                        <button id="stopButton" class="btn btn-danger w-100 mt-2" style="display: none;">
+                            <i class="ri-stop-circle-line"></i> Stop System
+                        </button>
+                        <button id="downloadPdf" class="btn btn-primary w-100 mt-2" style="display: none;">Download Report</button>
+                        <button id="startNewSession" class="btn btn-success w-100 mt-2" style="display: none;">
+                            <i class="ri-restart-line"></i> New Session
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
     <script>
-        let mainChart;
+        let tempChart, humidChart, speedChart, remainingChart;
         let hasDownloaded = false;
         let previousState = "disconnected";
 
-        function initChart() {
-            mainChart = new Chart(document.getElementById('mainChart').getContext('2d'), {
-                type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [
-                        { label: 'Temperature', data: [], borderColor: '#e53e3e', fill: false },
-                        { label: 'Humidity', data: [], borderColor: '#3182ce', fill: false },
-                        { label: 'Speed', data: [], borderColor: '#38a169', fill: false },
-                        { label: 'Remaining', data: [], borderColor: '#805ad5', fill: false }
-                    ]
+        function initCharts() {
+            const commonOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { 
+                    x: { 
+                        display: true, 
+                        ticks: { 
+                            maxRotation: 45, 
+                            minRotation: 45,
+                            color: '#9ca3af'
+                        },
+                        grid: {
+                            color: 'rgba(156, 163, 175, 0.1)'
+                        }
+                    }, 
+                    y: { 
+                        beginAtZero: false,
+                        ticks: {
+                            color: '#9ca3af'
+                        },
+                        grid: {
+                            color: 'rgba(156, 163, 175, 0.1)'
+                        }
+                    } 
                 },
-                options: {
-                    responsive: true,
-                    scales: { 
-                        x: { title: { display: true, text: 'Time' }, ticks: { maxRotation: 45, minRotation: 45 } }, 
-                        y: { beginAtZero: false } 
-                    },
-                    plugins: { legend: { position: 'top' } }
+                plugins: { 
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: '#1f2937',
+                        titleColor: '#f9fafb',
+                        bodyColor: '#f9fafb',
+                        borderColor: '#4cc9f0',
+                        borderWidth: 1
+                    }
                 }
+            };
+            
+            tempChart = new Chart(document.getElementById('tempChart').getContext('2d'), {
+                type: 'line',
+                data: { 
+                    labels: [], 
+                    datasets: [{ 
+                        data: [], 
+                        borderColor: '#f72585', 
+                        borderWidth: 2,
+                        pointBackgroundColor: '#f72585',
+                        pointRadius: 3,
+                        pointHoverRadius: 5,
+                        tension: 0.1,
+                        fill: false 
+                    }] 
+                },
+                options: commonOptions
+            });
+            
+            humidChart = new Chart(document.getElementById('humidChart').getContext('2d'), {
+                type: 'line',
+                data: { 
+                    labels: [], 
+                    datasets: [{ 
+                        data: [], 
+                        borderColor: '#4cc9f0', 
+                        borderWidth: 2,
+                        pointBackgroundColor: '#4cc9f0',
+                        pointRadius: 3,
+                        pointHoverRadius: 5,
+                        tension: 0.1,
+                        fill: false 
+                    }] 
+                },
+                options: commonOptions
+            });
+            
+            speedChart = new Chart(document.getElementById('speedChart').getContext('2d'), {
+                type: 'line',
+                data: { 
+                    labels: [], 
+                    datasets: [{ 
+                        data: [], 
+                        borderColor: '#4361ee', 
+                        borderWidth: 2,
+                        pointBackgroundColor: '#4361ee',
+                        pointRadius: 3,
+                        pointHoverRadius: 5,
+                        tension: 0.1,
+                        fill: false 
+                    }] 
+                },
+                options: commonOptions
+            });
+            
+            remainingChart = new Chart(document.getElementById('remainingChart').getContext('2d'), {
+                type: 'line',
+                data: { 
+                    labels: [], 
+                    datasets: [{ 
+                        data: [], 
+                        borderColor: '#9b59b6', 
+                        borderWidth: 2,
+                        pointBackgroundColor: '#9b59b6',
+                        pointRadius: 3,
+                        pointHoverRadius: 5,
+                        tension: 0.1,
+                        fill: false 
+                    }] 
+                },
+                options: commonOptions
             });
         }
 
-        function updateChart(data) {
+        function updateCharts(data) {
             const maxPoints = 20;
             const timestamps = data.history.timestamps.slice(-maxPoints);
-            mainChart.data.labels = timestamps;
-            mainChart.data.datasets[0].data = data.history.temperature.slice(-maxPoints);
-            mainChart.data.datasets[1].data = data.history.humidity.slice(-maxPoints);
-            mainChart.data.datasets[2].data = data.history.speed.slice(-maxPoints);
-            mainChart.data.datasets[3].data = data.history.remaining.slice(-maxPoints);
-            mainChart.update();
+            
+            tempChart.data.labels = timestamps;
+            tempChart.data.datasets[0].data = data.history.temperature.slice(-maxPoints);
+            tempChart.update();
+            
+            humidChart.data.labels = timestamps;
+            humidChart.data.datasets[0].data = data.history.humidity.slice(-maxPoints);
+            humidChart.update();
+            
+            speedChart.data.labels = timestamps;
+            speedChart.data.datasets[0].data = data.history.speed.slice(-maxPoints);
+            speedChart.update();
+            
+            remainingChart.data.labels = timestamps;
+            remainingChart.data.datasets[0].data = data.history.remaining.slice(-maxPoints);
+            remainingChart.update();
         }
 
-        function resetChart() {
-            mainChart.data.labels = [];
-            mainChart.data.datasets.forEach(dataset => dataset.data = []);
-            mainChart.update();
+        function resetCharts() {
+            tempChart.data.labels = [];
+            tempChart.data.datasets[0].data = [];
+            tempChart.update();
+            
+            humidChart.data.labels = [];
+            humidChart.data.datasets[0].data = [];
+            humidChart.update();
+            
+            speedChart.data.labels = [];
+            speedChart.data.datasets[0].data = [];
+            speedChart.update();
+            
+            remainingChart.data.labels = [];
+            remainingChart.data.datasets[0].data = [];
+            remainingChart.update();
         }
 
         function updateSystemStatus(status, isActive = false) {
             const statusElement = document.getElementById('systemStatus');
-            statusElement.textContent = status;
+            statusElement.innerHTML = isActive ? 
+                '<i class="ri-checkbox-circle-line"></i> ' + status : 
+                '<i class="ri-focus-3-line"></i> ' + status;
             statusElement.className = isActive ? 'status-badge active' : 'status-badge';
         }
 
         document.addEventListener('DOMContentLoaded', function() {
-            initChart();
+            initCharts();
             document.getElementById('submitSetup').addEventListener('click', submitSetup);
             document.getElementById('stopButton').addEventListener('click', stopSystem);
             document.getElementById('downloadPdf').addEventListener('click', downloadPdf);
@@ -544,21 +646,26 @@ body {
         async function submitSetup() {
             const authCode = parseInt(document.getElementById('authCode').value);
             const runtime = parseInt(document.getElementById('runtime').value);
+            
             if (isNaN(authCode) || authCode < 100 || authCode > 999) {
                 alert("Auth code must be between 100 and 999.");
                 return;
             }
+            
             if (isNaN(runtime) || runtime < 1) {
                 alert("Runtime must be a positive number.");
                 return;
             }
+            
             try {
                 const response = await fetch('/setup', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ authCode: authCode, runtime: runtime })
                 });
+                
                 const result = await response.json();
+                
                 if (result.status === 'waiting') {
                     updateSystemStatus('Waiting');
                     document.getElementById('submitSetup').disabled = true;
@@ -634,20 +741,21 @@ body {
                 const currentState = data.state;
 
                 updateSystemStatus(currentState.charAt(0).toUpperCase() + currentState.slice(1), currentState === 'running');
+                
                 if (data.data_received) {
-                    document.getElementById('temperature').textContent = `${data.temperature.toFixed(1)}°C`;
-                    document.getElementById('humidity').textContent = `${data.humidity.toFixed(1)}%`;
-                    document.getElementById('speed').textContent = `${data.speed}%`;
-                    document.getElementById('remaining').textContent = `${data.remaining}s`;
-                    updateChart(data);
+                    document.getElementById('temperature').innerHTML = `${data.temperature.toFixed(1)}<span class="metric-unit">°C</span>`;
+                    document.getElementById('humidity').innerHTML = `${data.humidity.toFixed(1)}<span class="metric-unit">%</span>`;
+                    document.getElementById('speed').innerHTML = `${data.speed}<span class="metric-unit">%</span>`;
+                    document.getElementById('remaining').innerHTML = `${data.remaining}<span class="metric-unit">s</span>`;
+                    updateCharts(data);
                 }
 
                 if (currentState === 'disconnected') {
-                    document.getElementById('temperature').textContent = `0°C`;
-                    document.getElementById('humidity').textContent = `0%`;
-                    document.getElementById('speed').textContent = `0%`;
-                    document.getElementById('remaining').textContent = `0s`;
-                    resetChart();
+                    document.getElementById('temperature').innerHTML = `0<span class="metric-unit">°C</span>`;
+                    document.getElementById('humidity').innerHTML = `0<span class="metric-unit">%</span>`;
+                    document.getElementById('speed').innerHTML = `0<span class="metric-unit">%</span>`;
+                    document.getElementById('remaining').innerHTML = `0<span class="metric-unit">s</span>`;
+                    resetCharts();
                 }
 
                 document.getElementById('stopButton').style.display = 
