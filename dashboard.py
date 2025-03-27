@@ -19,7 +19,6 @@ VALID_DEVICE_STATES = ["disconnected", "ready", "waiting", "running", "stopped"]
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Initialize with zeroed-out values
 data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
 history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
 data_received = False
@@ -321,7 +320,7 @@ HTML_CONTENT = '''
             padding: 20px;
             margin-bottom: 24px;
             border: 1px solid var(--border);
-            transition: all 0.3s ease;
+            transition for: all 0.3s ease;
         }
         .control-card:hover {
             transform: translateY(-5px);
@@ -363,6 +362,25 @@ HTML_CONTENT = '''
         .btn-danger:hover {
             background-color: #d3165e;
             border-color: #d3165e;
+            transform: translateY(-3px);
+            box-shadow: 0 7px 14px rgba(0, 0, 0, 0.25);
+        }
+        .btn-success { 
+            background-color: var(--success); 
+            border-color: var(--success); 
+            border-radius: 25px;
+            padding: 10px 20px;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            transition: 
+                background-color 0.3s ease,
+                transform 0.3s ease,
+                box-shadow 0.3s ease;
+        }
+        .btn-success:hover {
+            background-color: #38b260;
+            border-color: #38b260;
             transform: translateY(-3px);
             box-shadow: 0 7px 14px rgba(0, 0, 0, 0.25);
         }
@@ -446,6 +464,9 @@ HTML_CONTENT = '''
                             <i class="ri-stop-circle-line"></i> Stop & Restart
                         </button>
                         <button id="downloadPdf" class="btn btn-primary mt-2" style="display: none;">Download Report</button>
+                        <button id="startNewSession" class="btn btn-success mt-2" style="display: none;">
+                            <i class="ri-restart-line"></i> Start New Session
+                        </button>
                     </div>
                 </div>
             </div>
@@ -528,6 +549,7 @@ HTML_CONTENT = '''
             document.getElementById('submitSetup').addEventListener('click', submitSetup);
             document.getElementById('stopButton').addEventListener('click', stopSystem);
             document.getElementById('downloadPdf').addEventListener('click', downloadPdf);
+            document.getElementById('startNewSession').addEventListener('click', startNewSession);
             setInterval(fetchData, 1000);
         });
 
@@ -606,6 +628,26 @@ HTML_CONTENT = '''
             }
         }
 
+        async function startNewSession() {
+            try {
+                const response = await fetch('/reset', {
+                    method: 'POST'
+                });
+                if (response.ok) {
+                    hasDownloaded = false; // Reset download flag for new session
+                    document.getElementById('submitSetup').disabled = false; // Re-enable Configure Device
+                    fetchData(); // Update UI immediately
+                    console.log("New session started");
+                } else {
+                    console.error('Failed to reset for new session');
+                    alert('Failed to start new session.');
+                }
+            } catch (error) {
+                console.error('Error starting new session:', error);
+                alert('Failed to start new session.');
+            }
+        }
+
         async function fetchData() {
             try {
                 const response = await fetch('/data');
@@ -621,7 +663,6 @@ HTML_CONTENT = '''
                     updateCharts(data);
                 }
 
-                // Reset metrics and charts when state is 'disconnected'
                 if (currentState === 'disconnected') {
                     document.getElementById('temperature').innerHTML = `0<span class="metric-unit">°C</span>`;
                     document.getElementById('humidity').innerHTML = `0<span class="metric-unit">%</span>`;
@@ -633,6 +674,8 @@ HTML_CONTENT = '''
                 document.getElementById('stopButton').style.display = 
                     (currentState === 'running' || currentState === 'waiting' || currentState === 'ready') ? 'block' : 'none';
                 document.getElementById('downloadPdf').style.display = 
+                    (currentState === 'stopped' && data.history.timestamps.length > 0) ? 'block' : 'none';
+                document.getElementById('startNewSession').style.display = 
                     (currentState === 'stopped' && data.history.timestamps.length > 0) ? 'block' : 'none';
 
                 if (currentState === 'stopped' && previousState !== 'stopped' && data.history.timestamps.length > 0 && !hasDownloaded) {
@@ -770,11 +813,10 @@ async def handle_stop(request):
     try:
         device_state = "disconnected"
         if session_data:
-            latest_pdf = generate_pdf(session_data)  # Generate PDF with latest session data
-            session_data = []  # Clear session data after generating PDF
+            latest_pdf = generate_pdf(session_data)
+            session_data = []
         auth_code = None
         runtime = None
-        # Reset metrics and history
         data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
         history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
         data_received = False
@@ -785,21 +827,37 @@ async def handle_stop(request):
         logging.error(f"Error stopping system: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
+async def handle_reset(request):
+    global device_state, session_data, latest_pdf, auth_code, runtime, data, history, data_received
+    
+    try:
+        device_state = "disconnected"
+        session_data = []  # Clear session data without generating PDF
+        latest_pdf = None  # Clear previous PDF
+        auth_code = None
+        runtime = None
+        data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
+        history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
+        data_received = False
+        logging.info(f"System reset for new session - State: {device_state}")
+        return web.json_response({"status": "disconnected", "state": device_state})
+        
+    except Exception as e:
+        logging.error(f"Error resetting system: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
 async def handle_pdf_download(request):
     global latest_pdf, session_data
     
     try:
         if not latest_pdf or not os.path.exists(latest_pdf):
             if session_data:
-                latest_pdf = generate_pdf(session_data)  # Regenerate if missing but data exists
+                latest_pdf = generate_pdf(session_data)
             else:
                 logging.warning("No PDF or session data available for download")
                 return web.json_response({"error": "No PDF available"}, status=404)
             
         response = web.FileResponse(latest_pdf)
-        # Optionally clear latest_pdf after serving to force regeneration next time
-        # os.remove(latest_pdf)
-        # latest_pdf = None
         return response
         
     except Exception as e:
@@ -815,6 +873,7 @@ async def init_app():
     app.router.add_route('*', '/data', handle_data)
     app.router.add_post('/setup', handle_setup)
     app.router.add_post('/stop', handle_stop)
+    app.router.add_post('/reset', handle_reset)  # New endpoint
     app.router.add_get('/download_pdf', handle_pdf_download)
     return app
 
