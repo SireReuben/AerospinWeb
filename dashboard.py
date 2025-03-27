@@ -1,7 +1,7 @@
 import json
-import os 
 import asyncio
 import logging
+import os  # This line must be present
 from aiohttp import web
 import datetime
 import matplotlib.pyplot as plt
