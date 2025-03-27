@@ -145,6 +145,8 @@ def generate_pdf(session_data):
     return filename
 
 # HTML content (unchanged, assumed correct as provided)
+# [All imports and server-side code remain unchanged up to HTML_CONTENT]
+
 HTML_CONTENT = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -453,6 +455,8 @@ HTML_CONTENT = '''
     </div>
     <script>
         let tempChart, humidChart, speedChart, remainingChart;
+        let hasDownloaded = false;  // Flag to track if PDF has been downloaded
+        let previousState = "disconnected";  // Track previous state for transition detection
 
         function initCharts() {
             const commonOptions = {
@@ -515,41 +519,41 @@ HTML_CONTENT = '''
         });
 
         async function submitSetup() {
-    const authCode = parseInt(document.getElementById('authCode').value);
-    const runtime = parseInt(document.getElementById('runtime').value);
-    console.log("Button clicked - Auth Code:", authCode, "Runtime:", runtime);
-    if (isNaN(authCode) || authCode < 1 || authCode > 10) {
-        console.error("Invalid auth code");
-        alert("Auth code must be between 1 and 10.");
-        return;
-    }
-    if (isNaN(runtime) || runtime < 1) {
-        console.error("Invalid runtime");
-        alert("Runtime must be a positive number.");
-        return;
-    }
-    try {
-        console.log("Sending POST to /setup");
-        const response = await fetch('/setup', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ authCode: authCode, runtime: runtime })
-        });
-        const result = await response.json();
-        console.log("Server response:", result);
-        if (result.status === 'waiting') {
-            updateSystemStatus('Waiting');
-            document.getElementById('submitSetup').disabled = true;
-            fetchData(); // Force immediate state update
-        } else {
-            console.error("Unexpected response:", result);
-            alert("Setup failed: " + result.error);
+            const authCode = parseInt(document.getElementById('authCode').value);
+            const runtime = parseInt(document.getElementById('runtime').value);
+            console.log("Button clicked - Auth Code:", authCode, "Runtime:", runtime);
+            if (isNaN(authCode) || authCode < 1 || authCode > 10) {
+                console.error("Invalid auth code");
+                alert("Auth code must be between 1 and 10.");
+                return;
+            }
+            if (isNaN(runtime) || runtime < 1) {
+                console.error("Invalid runtime");
+                alert("Runtime must be a positive number.");
+                return;
+            }
+            try {
+                console.log("Sending POST to /setup");
+                const response = await fetch('/setup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ authCode: authCode, runtime: runtime })
+                });
+                const result = await response.json();
+                console.log("Server response:", result);
+                if (result.status === 'waiting') {
+                    updateSystemStatus('Waiting');
+                    document.getElementById('submitSetup').disabled = true;
+                    fetchData(); // Force immediate state update
+                } else {
+                    console.error("Unexpected response:", result);
+                    alert("Setup failed: " + result.error);
+                }
+            } catch (error) {
+                console.error('Error submitting setup:', error);
+                alert('Failed to submit setup.');
+            }
         }
-    } catch (error) {
-        console.error('Error submitting setup:', error);
-        alert('Failed to submit setup.');
-    }
-}
 
         async function stopSystem() {
             try {
@@ -578,6 +582,8 @@ HTML_CONTENT = '''
                     a.click();
                     a.remove();
                     window.URL.revokeObjectURL(url);
+                    hasDownloaded = true;  // Mark as downloaded
+                    console.log("PDF downloaded successfully");
                 } else {
                     alert('No report available.');
                 }
@@ -591,23 +597,32 @@ HTML_CONTENT = '''
             try {
                 const response = await fetch('/data');
                 const data = await response.json();
-                updateSystemStatus(data.state.charAt(0).toUpperCase() + data.state.slice(1), data.state === 'running');
+                const currentState = data.state;
+
+                // Update UI
+                updateSystemStatus(currentState.charAt(0).toUpperCase() + currentState.slice(1), currentState === 'running');
                 if (data.data_received) {
                     document.getElementById('temperature').innerHTML = `${data.temperature.toFixed(1)}<span class="metric-unit">°C</span>`;
                     document.getElementById('humidity').innerHTML = `${data.humidity.toFixed(1)}<span class="metric-unit">%</span>`;
                     document.getElementById('speed').innerHTML = `${data.speed}<span class="metric-unit">%</span>`;
                     document.getElementById('remaining').innerHTML = `${data.remaining}<span class="metric-unit">s</span>`;
                     updateCharts(data);
-
-                    document.getElementById('stopButton').style.display = 
-                        (data.state === 'running' || data.state === 'waiting' || data.state === 'ready') ? 'block' : 'none';
-                    document.getElementById('downloadPdf').style.display = 
-                        data.state === 'stopped' && data.history.timestamps.length > 0 ? 'block' : 'none';
-
-                    if (data.state === 'stopped' && data.history.timestamps.length > 0) {
-                        downloadPdf();
-                    }
                 }
+
+                // Show/hide buttons
+                document.getElementById('stopButton').style.display = 
+                    (currentState === 'running' || currentState === 'waiting' || currentState === 'ready') ? 'block' : 'none';
+                document.getElementById('downloadPdf').style.display = 
+                    (currentState === 'stopped' && data.history.timestamps.length > 0) ? 'block' : 'none';
+
+                // Trigger download only on state transition to 'stopped' and if not already downloaded
+                if (currentState === 'stopped' && previousState !== 'stopped' && data.history.timestamps.length > 0 && !hasDownloaded) {
+                    await downloadPdf();
+                }
+
+                // Update previous state
+                previousState = currentState;
+
             } catch (error) {
                 console.error('Error fetching data:', error);
                 updateSystemStatus('Connection Error');
@@ -617,6 +632,8 @@ HTML_CONTENT = '''
 </body>
 </html>
 '''
+
+# [Rest of the Python code (handle_data, handle_setup, handle_stop, handle_pdf_download, init_app, main) remains unchanged]
 
 async def handle_data(request):
     global data, history, device_state, data_received, session_data
