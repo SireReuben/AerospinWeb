@@ -13,15 +13,12 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
-# Configuration constants
-PORT = int(os.environ.get("PORT", 10000))  # Use Render's assigned port
-MAX_HISTORY = 20  # Configurable history limit
+PORT = int(os.environ.get("PORT", 10000))
+MAX_HISTORY = 20
 VALID_DEVICE_STATES = ["disconnected", "ready", "waiting", "running", "stopped"]
 
-# Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Global variables
 data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
 history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
 data_received = False
@@ -518,39 +515,41 @@ HTML_CONTENT = '''
         });
 
         async function submitSetup() {
-            const authCode = parseInt(document.getElementById('authCode').value);
-            const runtime = parseInt(document.getElementById('runtime').value);
-            console.log("Button clicked - Auth Code:", authCode, "Runtime:", runtime);
-            if (isNaN(authCode) || authCode < 1 || authCode > 10) {
-                console.error("Invalid auth code");
-                alert("Auth code must be between 1 and 10.");
-                return;
-            }
-            if (isNaN(runtime) || runtime < 1) {
-                console.error("Invalid runtime");
-                alert("Runtime must be a positive number.");
-                return;
-            }
-            try {
-                console.log("Sending POST to /setup");
-                const response = await fetch('/setup', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ authCode: authCode, runtime: runtime })
-                });
-                const result = await response.json();
-                console.log("Server response:", result);
-                if (result.status === 'waiting') {
-                    updateSystemStatus('Waiting for Device');
-                    document.getElementById('submitSetup').disabled = true;
-                } else {
-                    console.error("Unexpected response:", result);
-                }
-            } catch (error) {
-                console.error('Error submitting setup:', error);
-                alert('Failed to submit setup.');
-            }
+    const authCode = parseInt(document.getElementById('authCode').value);
+    const runtime = parseInt(document.getElementById('runtime').value);
+    console.log("Button clicked - Auth Code:", authCode, "Runtime:", runtime);
+    if (isNaN(authCode) || authCode < 1 || authCode > 10) {
+        console.error("Invalid auth code");
+        alert("Auth code must be between 1 and 10.");
+        return;
+    }
+    if (isNaN(runtime) || runtime < 1) {
+        console.error("Invalid runtime");
+        alert("Runtime must be a positive number.");
+        return;
+    }
+    try {
+        console.log("Sending POST to /setup");
+        const response = await fetch('/setup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ authCode: authCode, runtime: runtime })
+        });
+        const result = await response.json();
+        console.log("Server response:", result);
+        if (result.status === 'waiting') {
+            updateSystemStatus('Waiting');
+            document.getElementById('submitSetup').disabled = true;
+            fetchData(); // Force immediate state update
+        } else {
+            console.error("Unexpected response:", result);
+            alert("Setup failed: " + result.error);
         }
+    } catch (error) {
+        console.error('Error submitting setup:', error);
+        alert('Failed to submit setup.');
+    }
+}
 
         async function stopSystem() {
             try {
@@ -620,7 +619,6 @@ HTML_CONTENT = '''
 '''
 
 async def handle_data(request):
-    """Handle HTTP data requests with improved validation and state management."""
     global data, history, device_state, data_received, session_data
     
     if request.method == "POST":
@@ -632,7 +630,6 @@ async def handle_data(request):
             if status == "data":
                 required_fields = ['temperature', 'humidity', 'speed', 'remaining']
                 if all(field in post_data for field in required_fields):
-                    # Validate data types
                     if not (isinstance(post_data["temperature"], (int, float)) and 
                             isinstance(post_data["humidity"], (int, float)) and 
                             isinstance(post_data["speed"], int) and 
@@ -665,9 +662,22 @@ async def handle_data(request):
                 return web.json_response({"error": "Missing required fields"}, status=400)
             
             elif status == "arduino_ready":
-                device_state = "ready"
-                logging.info(f"State transitioned to: {device_state}")
+                if device_state == "disconnected":  # Only transition from disconnected
+                    device_state = "ready"
+                    logging.info(f"State transitioned to: {device_state}")
                 return web.json_response({"status": "ready", "state": device_state})
+            
+            elif status == "check_auth":
+                if auth_code is not None and runtime is not None:
+                    logging.info(f"Sending auth_code: {auth_code}, runtime: {runtime}")
+                    return web.json_response({
+                        "status": "auth_code",
+                        "code": auth_code,
+                        "runtime": runtime,
+                        "state": device_state
+                    })
+                logging.debug("No auth code yet or state not waiting, responding with current state")
+                return web.json_response({"status": "waiting", "state": device_state})
             
             elif status == "start":
                 device_state = "running"
@@ -686,7 +696,6 @@ async def handle_data(request):
             logging.error(f"Error processing data: {e}")
             return web.json_response({"error": "Internal server error"}, status=500)
     
-    # Return current state for GET requests
     return web.json_response({
         "state": device_state,
         "temperature": data["temperature"],
@@ -697,8 +706,8 @@ async def handle_data(request):
         "history": history
     })
 
+
 async def handle_setup(request):
-    """Handle device setup requests with validation."""
     global auth_code, runtime, device_state
     
     try:
@@ -724,11 +733,10 @@ async def handle_setup(request):
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_stop(request):
-    """Handle system stop requests."""
     global device_state, session_data, latest_pdf, auth_code, runtime
     
     try:
-        device_state = "stopped"
+        device_state = "disconnected"  # Reset to initial state
         if session_data:
             latest_pdf = generate_pdf(session_data)
             session_data = []
