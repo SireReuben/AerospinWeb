@@ -770,23 +770,6 @@ async def init_app():
     return app
 
 
-async def main():
-    global serial_manager
-    try:
-        await serial_manager.get_instance()
-        #asyncio.create_task(read_serial_async())
-        app = await init_app()
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', PORT)
-        await site.start()
-        logging.info(f"Server started at http://localhost:{PORT}")
-        while True:
-            await asyncio.sleep(10)
-    except Exception as e:
-        logging.error(f"Main loop error: {e}")
-        await serial_manager.close()
-
 
 if __name__ == "__main__":
     asyncio.run(main())
