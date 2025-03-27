@@ -14,7 +14,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 # Serial port configuration
-SERIAL_PORT = '/dev/cu.usbserial-21130'  # Update this to your port
+#SERIAL_PORT = '/dev/cu.usbserial-21130'  # Update this to your port
 BAUD_RATE = 115200
 PORT = 8080
 
@@ -788,6 +788,9 @@ async def init_app():
     app.router.add_post('/start', handle_start)
     app.router.add_post('/stop', handle_stop)
     app.router.add_get('/download_pdf', handle_pdf_download)
+    app.router.add_route('GET', '/data', handle_data)
+    app.router.add_route('POST', '/data', handle_data)
+
     return app
 
 
