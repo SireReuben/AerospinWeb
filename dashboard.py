@@ -16,6 +16,8 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 PORT = int(os.environ.get("PORT", 10000))
 MAX_HISTORY = 20
 VALID_DEVICE_STATES = ["disconnected", "ready", "waiting", "running", "stopped"]
+VALID_AUTH_CODE_MIN = 100
+VALID_AUTH_CODE_MAX = 999
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -150,48 +152,38 @@ HTML_CONTENT = '''
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aerospin Dashboard</title>
+    <title>Aerospin Control Center</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
     <style>
         :root {
-            --primary: #4361ee;
-            --secondary: #3a0ca3;
-            --accent: #4cc9f0;
-            --warning: #f72585;
-            --success: #4ade80;
-            --background: #111827;
-            --card-bg: #1f2937;
-            --text: #f9fafb;
-            --text-secondary: #9ca3af;
-            --border: #374151;
+            --primary: #2c5282;
+            --secondary: #1a365d;
+            --accent: #63b3ed;
+            --warning: #e53e3e;
+            --success: #38a169;
+            --background: #f7fafc;
+            --card-bg: #ffffff;
+            --text: #2d3748;
+            --text-secondary: #718096;
+            --border: #e2e8f0;
         }
         body {
             background: var(--background);
             color: var(--text);
-            font-family: 'Poppins', sans-serif;
+            font-family: 'Roboto', sans-serif;
             margin: 0;
-            padding: 0;
+            padding: 20px;
             min-height: 100vh;
-            line-height: 1.6;
-        }
-        .container { 
-            max-width: 1300px; 
-            padding: 20px; 
         }
         .dashboard {
-            border-radius: 16px;
+            background: var(--card-bg);
+            border-radius: 12px;
             padding: 24px;
-            background: linear-gradient(135deg, 
-                rgba(31, 41, 55, 0.95), 
-                rgba(17, 24, 39, 0.98));
-            border: 1px solid rgba(55, 65, 81, 0.5);
-            box-shadow: 
-                0 15px 35px rgba(0, 0, 0, 0.3), 
-                0 5px 15px rgba(0, 0, 0, 0.2);
-            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border: 1px solid var(--border);
         }
         .header {
             display: flex;
@@ -202,207 +194,97 @@ HTML_CONTENT = '''
             border-bottom: 1px solid var(--border);
         }
         .header h1 {
-            font-size: 24px;
-            font-weight: 600;
+            font-size: 28px;
+            font-weight: 700;
             margin: 0;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        .header h1 i { 
-            color: var(--accent); 
-            transition: transform 0.3s ease;
-        }
-        .header h1 i:hover {
-            transform: rotate(15deg) scale(1.1);
+            color: var(--primary);
         }
         .status-badge {
-            background: rgba(67, 97, 238, 0.15);
-            color: var(--accent);
-            padding: 6px 12px;
+            background: var(--accent);
+            color: white;
+            padding: 6px 16px;
             border-radius: 20px;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            transition: all 0.3s ease;
-        }
-        .status-badge:hover {
-            transform: scale(1.05);
-            background: rgba(67, 97, 238, 0.25);
+            font-weight: 500;
         }
         .status-badge.active {
-            background: rgba(74, 222, 128, 0.15);
-            color: var(--success);
+            background: var(--success);
         }
         .metric-card {
             background: var(--card-bg);
-            border-radius: 12px;
+            border-radius: 8px;
             padding: 20px;
-            margin-bottom: 24px;
             border: 1px solid var(--border);
-            transition: 
-                transform 0.4s cubic-bezier(0.25, 0.1, 0.25, 1),
-                box-shadow 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
-            position: relative;
-            overflow: hidden;
-        }
-        .metric-card::before {
-            content: '';
-            position: absolute;
-            top: -50%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: linear-gradient(
-                45deg, 
-                transparent, 
-                rgba(255,255,255,0.05), 
-                transparent
-            );
-            transform: rotate(-45deg);
-            opacity: 0;
-            transition: opacity 0.3s ease;
-        }
-        .metric-card:hover::before {
-            opacity: 1;
+            transition: box-shadow 0.3s ease;
         }
         .metric-card:hover {
-            transform: translateY(-8px) scale(1.02);
-            box-shadow: 
-                0 15px 30px rgba(0, 0, 0, 0.3), 
-                0 0 20px rgba(67, 97, 238, 0.2);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
         }
         .metric-title {
-            font-size: 13px;
+            font-size: 14px;
             color: var(--text-secondary);
-            margin-bottom: 12px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
             font-weight: 500;
-            letter-spacing: 0.5px;
-            text-transform: uppercase;
+            margin-bottom: 8px;
         }
         .metric-value {
-            font-size: 28px;
+            font-size: 32px;
             font-weight: 700;
-            margin-bottom: 4px;
-            letter-spacing: -1px;
-        }
-        .metric-unit {
-            font-size: 16px;
-            color: var(--text-secondary);
-            margin-left: 5px;
+            color: var(--primary);
         }
         .chart-container {
-            position: relative;
-            height: 220px;
-            margin-bottom: 24px;
-            background: rgba(31, 41, 55, 0.6);
-            border-radius: 12px;
+            background: var(--card-bg);
+            border-radius: 8px;
             padding: 16px;
             border: 1px solid var(--border);
-            backdrop-filter: blur(10px);
-            transition: 
-                transform 0.4s cubic-bezier(0.25, 0.1, 0.25, 1),
-                box-shadow 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
-        }
-        .chart-container:hover {
-            transform: translateY(-8px) scale(1.02);
-            box-shadow: 
-                0 15px 30px rgba(0, 0, 0, 0.3), 
-                0 0 20px rgba(67, 97, 238, 0.2);
         }
         .control-card {
             background: var(--card-bg);
-            border-radius: 12px;
+            border-radius: 8px;
             padding: 20px;
-            margin-bottom: 24px;
             border: 1px solid var(--border);
-            transition for: all 0.3s ease;
         }
-        .control-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 
-                0 10px 20px rgba(0, 0, 0, 0.2);
-        }
-        .btn-primary { 
-            background-color: var(--primary); 
-            border-color: var(--primary); 
-            border-radius: 25px;
+        .btn-primary {
+            background-color: var(--primary);
+            border-color: var(--primary);
+            border-radius: 8px;
             padding: 10px 20px;
-            text-transform: uppercase;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-            transition: 
-                background-color 0.3s ease,
-                transform 0.3s ease,
-                box-shadow 0.3s ease;
+            font-weight: 500;
+            transition: all 0.3s ease;
         }
         .btn-primary:hover {
             background-color: var(--secondary);
             border-color: var(--secondary);
-            transform: translateY(-3px);
-            box-shadow: 0 7px 14px rgba(0, 0, 0, 0.25);
         }
-        .btn-danger { 
-            background-color: var(--warning); 
-            border-color: var(--warning); 
-            border-radius: 25px;
+        .btn-danger {
+            background-color: var(--warning);
+            border-color: var(--warning);
+            border-radius: 8px;
             padding: 10px 20px;
-            text-transform: uppercase;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-            transition: 
-                background-color 0.3s ease,
-                transform 0.3s ease,
-                box-shadow 0.3s ease;
-        }
-        .btn-danger:hover {
-            background-color: #d3165e;
-            border-color: #d3165e;
-            transform: translateY(-3px);
-            box-shadow: 0 7px 14px rgba(0, 0, 0, 0.25);
-        }
-        .btn-success { 
-            background-color: var(--success); 
-            border-color: var(--success); 
-            border-radius: 25px;
-            padding: 10px 20px;
-            text-transform: uppercase;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-            transition: 
-                background-color 0.3s ease,
-                transform 0.3s ease,
-                box-shadow 0.3s ease;
-        }
-        .btn-success:hover {
-            background-color: #38b260;
-            border-color: #38b260;
-            transform: translateY(-3px);
-            box-shadow: 0 7px 14px rgba(0, 0, 0, 0.25);
-        }
-        .form-control {
-            background-color: var(--background);
-            color: var(--text);
-            border-color: var(--border);
+            font-weight: 500;
             transition: all 0.3s ease;
         }
-        .form-control:focus {
-            background-color: var(--background);
-            color: var(--text);
-            border-color: var(--primary);
-            outline: none;
-            box-shadow: 
-                0 0 0 3px rgba(67, 97, 238, 0.3),
-                0 0 0 1px rgba(67, 97, 238, 0.8);
+        .btn-danger:hover {
+            background-color: #c53030;
+            border-color: #c53030;
         }
-        @media (max-width: 768px) {
-            .metric-card, .chart-container {
-                margin-bottom: 15px;
-            }
+        .btn-success {
+            background-color: var(--success);
+            border-color: var(--success);
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+        .btn-success:hover {
+            background-color: #2f855a;
+            border-color: #2f855a;
+        }
+        .form-control {
+            border-radius: 8px;
+            border-color: var(--border);
+        }
+        .form-control:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(44, 82, 130, 0.2);
         }
     </style>
 </head>
@@ -410,142 +292,104 @@ HTML_CONTENT = '''
     <div class="container" id="dashboard">
         <div class="dashboard">
             <div class="header">
-                <h1><i class="ri-dashboard-3-line"></i> Aerospin Dashboard</h1>
-                <div id="systemStatus" class="status-badge"><i class="ri-focus-3-line"></i> Disconnected</div>
+                <h1><i class="ri-dashboard-3-line"></i> Aerospin Control Center</h1>
+                <div id="systemStatus" class="status-badge">Disconnected</div>
             </div>
-            <div class="row">
-                <div class="col-md-3">
-                    <div class="metric-card temperature">
-                        <div class="metric-title"><i class="ri-temp-hot-line"></i> Temperature</div>
-                        <div id="temperature" class="metric-value">0<span class="metric-unit">°C</span></div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="metric-card humidity">
-                        <div class="metric-title"><i class="ri-drop-line"></i> Humidity</div>
-                        <div id="humidity" class="metric-value">0<span class="metric-unit">%</span></div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="metric-card speed">
-                        <div class="metric-title"><i class="ri-speed-line"></i> Speed</div>
-                        <div id="speed" class="metric-value">0<span class="metric-unit">%</span></div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="metric-card remaining">
-                        <div class="metric-title"><i class="ri-time-line"></i> Time Remaining</div>
-                        <div id="remaining" class="metric-value">0<span class="metric-unit">s</span></div>
-                    </div>
-                </div>
+            <div class="row g-4">
+                <div class="col-md-3"><div class="metric-card">
+                    <div class="metric-title">Temperature</div>
+                    <div id="temperature" class="metric-value">0°C</div>
+                </div></div>
+                <div class="col-md-3"><div class="metric-card">
+                    <div class="metric-title">Humidity</div>
+                    <div id="humidity" class="metric-value">0%</div>
+                </div></div>
+                <div class="col-md-3"><div class="metric-card">
+                    <div class="metric-title">Speed</div>
+                    <div id="speed" class="metric-value">0%</div>
+                </div></div>
+                <div class="col-md-3"><div class="metric-card">
+                    <div class="metric-title">Time Remaining</div>
+                    <div id="remaining" class="metric-value">0s</div>
+                </div></div>
             </div>
-            <div class="row">
-                <div class="col-md-3"><div class="chart-container"><canvas id="tempChart"></canvas></div></div>
-                <div class="col-md-3"><div class="chart-container"><canvas id="humidChart"></canvas></div></div>
-                <div class="col-md-3"><div class="chart-container"><canvas id="speedChart"></canvas></div></div>
-                <div class="col-md-3"><div class="chart-container"><canvas id="remainingChart"></canvas></div></div>
+            <div class="row g-4 mt-4">
+                <div class="col-md-12"><div class="chart-container">
+                    <canvas id="mainChart"></canvas>
+                </div></div>
             </div>
-            <div class="row">
-                <div class="col-md-4">
-                    <div class="control-card">
-                        <div class="control-header">
-                            <h3>Device Setup</h3>
-                        </div>
-                        <div class="mb-3">
-                            <label for="authCode">Auth Code (1-10):</label>
-                            <input type="number" id="authCode" min="1" max="10" class="form-control" style="width: 100px;" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="runtime">Runtime (seconds):</label>
-                            <input type="number" id="runtime" min="1" class="form-control" style="width: 100px;" required>
-                        </div>
-                        <button id="submitSetup" class="btn btn-primary">Configure Device</button>
-                        <button id="stopButton" class="btn btn-danger mt-2" style="display: none;">
-                            <i class="ri-stop-circle-line"></i> Stop & Restart
-                        </button>
-                        <button id="downloadPdf" class="btn btn-primary mt-2" style="display: none;">Download Report</button>
-                        <button id="startNewSession" class="btn btn-success mt-2" style="display: none;">
-                            <i class="ri-restart-line"></i> Start New Session
-                        </button>
+            <div class="row g-4 mt-4">
+                <div class="col-md-4"><div class="control-card">
+                    <h4 class="mb-3">Control Panel</h4>
+                    <div class="mb-3">
+                        <label for="authCode" class="form-label">Auth Code (100-999)</label>
+                        <input type="number" id="authCode" min="100" max="999" class="form-control" required>
                     </div>
-                </div>
+                    <div class="mb-3">
+                        <label for="runtime" class="form-label">Runtime (seconds)</label>
+                        <input type="number" id="runtime" min="1" class="form-control" required>
+                    </div>
+                    <button id="submitSetup" class="btn btn-primary w-100">Configure System</button>
+                    <button id="stopButton" class="btn btn-danger w-100 mt-2" style="display: none;">Stop System</button>
+                    <button id="downloadPdf" class="btn btn-primary w-100 mt-2" style="display: none;">Download Report</button>
+                    <button id="startNewSession" class="btn btn-success w-100 mt-2" style="display: none;">New Session</button>
+                </div></div>
             </div>
         </div>
     </div>
     <script>
-        let tempChart, humidChart, speedChart, remainingChart;
+        let mainChart;
         let hasDownloaded = false;
         let previousState = "disconnected";
 
-        function initCharts() {
-            const commonOptions = {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: { x: { display: true, ticks: { maxRotation: 45, minRotation: 45 } }, y: { beginAtZero: false } },
-                plugins: { legend: { display: false } }
-            };
-            tempChart = new Chart(document.getElementById('tempChart').getContext('2d'), {
+        function initChart() {
+            mainChart = new Chart(document.getElementById('mainChart').getContext('2d'), {
                 type: 'line',
-                data: { labels: [], datasets: [{ data: [], borderColor: '#f72585', fill: false }] },
-                options: commonOptions
-            });
-            humidChart = new Chart(document.getElementById('humidChart').getContext('2d'), {
-                type: 'line',
-                data: { labels: [], datasets: [{ data: [], borderColor: '#4cc9f0', fill: false }] },
-                options: commonOptions
-            });
-            speedChart = new Chart(document.getElementById('speedChart').getContext('2d'), {
-                type: 'line',
-                data: { labels: [], datasets: [{ data: [], borderColor: '#4361ee', fill: false }] },
-                options: commonOptions
-            });
-            remainingChart = new Chart(document.getElementById('remainingChart').getContext('2d'), {
-                type: 'line',
-                data: { labels: [], datasets: [{ data: [], borderColor: '#9b59b6', fill: false }] },
-                options: commonOptions
+                data: {
+                    labels: [],
+                    datasets: [
+                        { label: 'Temperature', data: [], borderColor: '#e53e3e', fill: false },
+                        { label: 'Humidity', data: [], borderColor: '#3182ce', fill: false },
+                        { label: 'Speed', data: [], borderColor: '#38a169', fill: false },
+                        { label: 'Remaining', data: [], borderColor: '#805ad5', fill: false }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    scales: { 
+                        x: { title: { display: true, text: 'Time' }, ticks: { maxRotation: 45, minRotation: 45 } }, 
+                        y: { beginAtZero: false } 
+                    },
+                    plugins: { legend: { position: 'top' } }
+                }
             });
         }
 
-        function updateCharts(data) {
+        function updateChart(data) {
             const maxPoints = 20;
             const timestamps = data.history.timestamps.slice(-maxPoints);
-            tempChart.data.labels = timestamps;
-            tempChart.data.datasets[0].data = data.history.temperature.slice(-maxPoints);
-            tempChart.update();
-            humidChart.data.labels = timestamps;
-            humidChart.data.datasets[0].data = data.history.humidity.slice(-maxPoints);
-            humidChart.update();
-            speedChart.data.labels = timestamps;
-            speedChart.data.datasets[0].data = data.history.speed.slice(-maxPoints);
-            speedChart.update();
-            remainingChart.data.labels = timestamps;
-            remainingChart.data.datasets[0].data = data.history.remaining.slice(-maxPoints);
-            remainingChart.update();
+            mainChart.data.labels = timestamps;
+            mainChart.data.datasets[0].data = data.history.temperature.slice(-maxPoints);
+            mainChart.data.datasets[1].data = data.history.humidity.slice(-maxPoints);
+            mainChart.data.datasets[2].data = data.history.speed.slice(-maxPoints);
+            mainChart.data.datasets[3].data = data.history.remaining.slice(-maxPoints);
+            mainChart.update();
         }
 
-        function resetCharts() {
-            tempChart.data.labels = [];
-            tempChart.data.datasets[0].data = [];
-            tempChart.update();
-            humidChart.data.labels = [];
-            humidChart.data.datasets[0].data = [];
-            humidChart.update();
-            speedChart.data.labels = [];
-            speedChart.data.datasets[0].data = [];
-            speedChart.update();
-            remainingChart.data.labels = [];
-            remainingChart.data.datasets[0].data = [];
-            remainingChart.update();
+        function resetChart() {
+            mainChart.data.labels = [];
+            mainChart.data.datasets.forEach(dataset => dataset.data = []);
+            mainChart.update();
         }
 
         function updateSystemStatus(status, isActive = false) {
             const statusElement = document.getElementById('systemStatus');
-            statusElement.innerHTML = isActive ? '<i class="ri-checkbox-circle-line"></i> ' + status : '<i class="ri-focus-3-line"></i> ' + status;
+            statusElement.textContent = status;
             statusElement.className = isActive ? 'status-badge active' : 'status-badge';
         }
 
         document.addEventListener('DOMContentLoaded', function() {
-            initCharts();
+            initChart();
             document.getElementById('submitSetup').addEventListener('click', submitSetup);
             document.getElementById('stopButton').addEventListener('click', stopSystem);
             document.getElementById('downloadPdf').addEventListener('click', downloadPdf);
@@ -556,32 +400,26 @@ HTML_CONTENT = '''
         async function submitSetup() {
             const authCode = parseInt(document.getElementById('authCode').value);
             const runtime = parseInt(document.getElementById('runtime').value);
-            console.log("Button clicked - Auth Code:", authCode, "Runtime:", runtime);
-            if (isNaN(authCode) || authCode < 1 || authCode > 10) {
-                console.error("Invalid auth code");
-                alert("Auth code must be between 1 and 10.");
+            if (isNaN(authCode) || authCode < 100 || authCode > 999) {
+                alert("Auth code must be between 100 and 999.");
                 return;
             }
             if (isNaN(runtime) || runtime < 1) {
-                console.error("Invalid runtime");
                 alert("Runtime must be a positive number.");
                 return;
             }
             try {
-                console.log("Sending POST to /setup");
                 const response = await fetch('/setup', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ authCode: authCode, runtime: runtime })
                 });
                 const result = await response.json();
-                console.log("Server response:", result);
                 if (result.status === 'waiting') {
                     updateSystemStatus('Waiting');
                     document.getElementById('submitSetup').disabled = true;
                     fetchData();
                 } else {
-                    console.error("Unexpected response:", result);
                     alert("Setup failed: " + result.error);
                 }
             } catch (error) {
@@ -618,7 +456,6 @@ HTML_CONTENT = '''
                     a.remove();
                     window.URL.revokeObjectURL(url);
                     hasDownloaded = true;
-                    console.log("PDF downloaded successfully");
                 } else {
                     alert('No report available.');
                 }
@@ -634,12 +471,10 @@ HTML_CONTENT = '''
                     method: 'POST'
                 });
                 if (response.ok) {
-                    hasDownloaded = false; // Reset download flag for new session
-                    document.getElementById('submitSetup').disabled = false; // Re-enable Configure Device
-                    fetchData(); // Update UI immediately
-                    console.log("New session started");
+                    hasDownloaded = false;
+                    document.getElementById('submitSetup').disabled = false;
+                    fetchData();
                 } else {
-                    console.error('Failed to reset for new session');
                     alert('Failed to start new session.');
                 }
             } catch (error) {
@@ -656,19 +491,19 @@ HTML_CONTENT = '''
 
                 updateSystemStatus(currentState.charAt(0).toUpperCase() + currentState.slice(1), currentState === 'running');
                 if (data.data_received) {
-                    document.getElementById('temperature').innerHTML = `${data.temperature.toFixed(1)}<span class="metric-unit">°C</span>`;
-                    document.getElementById('humidity').innerHTML = `${data.humidity.toFixed(1)}<span class="metric-unit">%</span>`;
-                    document.getElementById('speed').innerHTML = `${data.speed}<span class="metric-unit">%</span>`;
-                    document.getElementById('remaining').innerHTML = `${data.remaining}<span class="metric-unit">s</span>`;
-                    updateCharts(data);
+                    document.getElementById('temperature').textContent = `${data.temperature.toFixed(1)}°C`;
+                    document.getElementById('humidity').textContent = `${data.humidity.toFixed(1)}%`;
+                    document.getElementById('speed').textContent = `${data.speed}%`;
+                    document.getElementById('remaining').textContent = `${data.remaining}s`;
+                    updateChart(data);
                 }
 
                 if (currentState === 'disconnected') {
-                    document.getElementById('temperature').innerHTML = `0<span class="metric-unit">°C</span>`;
-                    document.getElementById('humidity').innerHTML = `0<span class="metric-unit">%</span>`;
-                    document.getElementById('speed').innerHTML = `0<span class="metric-unit">%</span>`;
-                    document.getElementById('remaining').innerHTML = `0<span class="metric-unit">s</span>`;
-                    resetCharts();
+                    document.getElementById('temperature').textContent = `0°C`;
+                    document.getElementById('humidity').textContent = `0%`;
+                    document.getElementById('speed').textContent = `0%`;
+                    document.getElementById('remaining').textContent = `0s`;
+                    resetChart();
                 }
 
                 document.getElementById('stopButton').style.display = 
@@ -792,9 +627,9 @@ async def handle_setup(request):
         auth_code = post_data.get("authCode")
         runtime = post_data.get("runtime")
         
-        if not (isinstance(auth_code, int) and 1 <= auth_code <= 10) or not (isinstance(runtime, int) and runtime > 0):
+        if not (isinstance(auth_code, int) and VALID_AUTH_CODE_MIN <= auth_code <= VALID_AUTH_CODE_MAX) or not (isinstance(runtime, int) and runtime > 0):
             logging.warning(f"Invalid setup data - authCode: {auth_code}, runtime: {runtime}")
-            return web.json_response({"error": "Invalid auth code or runtime"}, status=400)
+            return web.json_response({"error": f"Auth code must be between {VALID_AUTH_CODE_MIN} and {VALID_AUTH_CODE_MAX}"}, status=400)
             
         device_state = "waiting"
         logging.info(f"Setup complete - Auth Code: {auth_code}, Runtime: {runtime}, State: {device_state}")
@@ -832,8 +667,8 @@ async def handle_reset(request):
     
     try:
         device_state = "disconnected"
-        session_data = []  # Clear session data without generating PDF
-        latest_pdf = None  # Clear previous PDF
+        session_data = []
+        latest_pdf = None
         auth_code = None
         runtime = None
         data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
@@ -873,7 +708,7 @@ async def init_app():
     app.router.add_route('*', '/data', handle_data)
     app.router.add_post('/setup', handle_setup)
     app.router.add_post('/stop', handle_stop)
-    app.router.add_post('/reset', handle_reset)  # New endpoint
+    app.router.add_post('/reset', handle_reset)
     app.router.add_get('/download_pdf', handle_pdf_download)
     return app
 
