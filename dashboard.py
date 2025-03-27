@@ -19,6 +19,7 @@ VALID_DEVICE_STATES = ["disconnected", "ready", "waiting", "running", "stopped"]
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Initialize with zeroed-out values
 data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
 history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
 data_received = False
@@ -143,9 +144,6 @@ def generate_pdf(session_data):
     doc.build(elements)
     logging.info(f"PDF generated: {filename}")
     return filename
-
-# HTML content (unchanged, assumed correct as provided)
-# [All imports and server-side code remain unchanged up to HTML_CONTENT]
 
 HTML_CONTENT = '''
 <!DOCTYPE html>
@@ -455,8 +453,8 @@ HTML_CONTENT = '''
     </div>
     <script>
         let tempChart, humidChart, speedChart, remainingChart;
-        let hasDownloaded = false;  // Flag to track if PDF has been downloaded
-        let previousState = "disconnected";  // Track previous state for transition detection
+        let hasDownloaded = false;
+        let previousState = "disconnected";
 
         function initCharts() {
             const commonOptions = {
@@ -504,6 +502,21 @@ HTML_CONTENT = '''
             remainingChart.update();
         }
 
+        function resetCharts() {
+            tempChart.data.labels = [];
+            tempChart.data.datasets[0].data = [];
+            tempChart.update();
+            humidChart.data.labels = [];
+            humidChart.data.datasets[0].data = [];
+            humidChart.update();
+            speedChart.data.labels = [];
+            speedChart.data.datasets[0].data = [];
+            speedChart.update();
+            remainingChart.data.labels = [];
+            remainingChart.data.datasets[0].data = [];
+            remainingChart.update();
+        }
+
         function updateSystemStatus(status, isActive = false) {
             const statusElement = document.getElementById('systemStatus');
             statusElement.innerHTML = isActive ? '<i class="ri-checkbox-circle-line"></i> ' + status : '<i class="ri-focus-3-line"></i> ' + status;
@@ -544,7 +557,7 @@ HTML_CONTENT = '''
                 if (result.status === 'waiting') {
                     updateSystemStatus('Waiting');
                     document.getElementById('submitSetup').disabled = true;
-                    fetchData(); // Force immediate state update
+                    fetchData();
                 } else {
                     console.error("Unexpected response:", result);
                     alert("Setup failed: " + result.error);
@@ -582,7 +595,7 @@ HTML_CONTENT = '''
                     a.click();
                     a.remove();
                     window.URL.revokeObjectURL(url);
-                    hasDownloaded = true;  // Mark as downloaded
+                    hasDownloaded = true;
                     console.log("PDF downloaded successfully");
                 } else {
                     alert('No report available.');
@@ -599,7 +612,6 @@ HTML_CONTENT = '''
                 const data = await response.json();
                 const currentState = data.state;
 
-                // Update UI
                 updateSystemStatus(currentState.charAt(0).toUpperCase() + currentState.slice(1), currentState === 'running');
                 if (data.data_received) {
                     document.getElementById('temperature').innerHTML = `${data.temperature.toFixed(1)}<span class="metric-unit">°C</span>`;
@@ -609,18 +621,24 @@ HTML_CONTENT = '''
                     updateCharts(data);
                 }
 
-                // Show/hide buttons
+                // Reset metrics and charts when state is 'disconnected'
+                if (currentState === 'disconnected') {
+                    document.getElementById('temperature').innerHTML = `0<span class="metric-unit">°C</span>`;
+                    document.getElementById('humidity').innerHTML = `0<span class="metric-unit">%</span>`;
+                    document.getElementById('speed').innerHTML = `0<span class="metric-unit">%</span>`;
+                    document.getElementById('remaining').innerHTML = `0<span class="metric-unit">s</span>`;
+                    resetCharts();
+                }
+
                 document.getElementById('stopButton').style.display = 
                     (currentState === 'running' || currentState === 'waiting' || currentState === 'ready') ? 'block' : 'none';
                 document.getElementById('downloadPdf').style.display = 
                     (currentState === 'stopped' && data.history.timestamps.length > 0) ? 'block' : 'none';
 
-                // Trigger download only on state transition to 'stopped' and if not already downloaded
                 if (currentState === 'stopped' && previousState !== 'stopped' && data.history.timestamps.length > 0 && !hasDownloaded) {
                     await downloadPdf();
                 }
 
-                // Update previous state
                 previousState = currentState;
 
             } catch (error) {
@@ -632,8 +650,6 @@ HTML_CONTENT = '''
 </body>
 </html>
 '''
-
-# [Rest of the Python code (handle_data, handle_setup, handle_stop, handle_pdf_download, init_app, main) remains unchanged]
 
 async def handle_data(request):
     global data, history, device_state, data_received, session_data
@@ -679,7 +695,7 @@ async def handle_data(request):
                 return web.json_response({"error": "Missing required fields"}, status=400)
             
             elif status == "arduino_ready":
-                if device_state == "disconnected":  # Only transition from disconnected
+                if device_state == "disconnected":
                     device_state = "ready"
                     logging.info(f"State transitioned to: {device_state}")
                 return web.json_response({"status": "ready", "state": device_state})
@@ -723,7 +739,6 @@ async def handle_data(request):
         "history": history
     })
 
-
 async def handle_setup(request):
     global auth_code, runtime, device_state
     
@@ -750,16 +765,20 @@ async def handle_setup(request):
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_stop(request):
-    global device_state, session_data, latest_pdf, auth_code, runtime
+    global device_state, session_data, latest_pdf, auth_code, runtime, data, history, data_received
     
     try:
-        device_state = "disconnected"  # Reset to initial state
+        device_state = "disconnected"
         if session_data:
-            latest_pdf = generate_pdf(session_data)
-            session_data = []
+            latest_pdf = generate_pdf(session_data)  # Generate PDF with latest session data
+            session_data = []  # Clear session data after generating PDF
         auth_code = None
         runtime = None
-        logging.info(f"System stopped, state reset - State: {device_state}")
+        # Reset metrics and history
+        data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
+        history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
+        data_received = False
+        logging.info(f"System stopped, state and metrics reset - State: {device_state}")
         return web.json_response({"status": "stopped", "state": device_state})
         
     except Exception as e:
@@ -767,29 +786,30 @@ async def handle_stop(request):
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_pdf_download(request):
-    """Handle PDF download requests."""
     global latest_pdf, session_data
     
     try:
-        if not latest_pdf and session_data:
-            latest_pdf = generate_pdf(session_data)
+        if not latest_pdf or not os.path.exists(latest_pdf):
+            if session_data:
+                latest_pdf = generate_pdf(session_data)  # Regenerate if missing but data exists
+            else:
+                logging.warning("No PDF or session data available for download")
+                return web.json_response({"error": "No PDF available"}, status=404)
             
-        if not latest_pdf:
-            logging.warning("No PDF available for download")
-            return web.json_response({"error": "No PDF available"}, status=404)
-            
-        return web.FileResponse(latest_pdf)
+        response = web.FileResponse(latest_pdf)
+        # Optionally clear latest_pdf after serving to force regeneration next time
+        # os.remove(latest_pdf)
+        # latest_pdf = None
+        return response
         
     except Exception as e:
         logging.error(f"Error serving PDF: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_root(request):
-    """Serve the dashboard HTML."""
     return web.Response(text=HTML_CONTENT, content_type='text/html')
 
 async def init_app():
-    """Initialize the web application with routes."""
     app = web.Application()
     app.router.add_get('/', handle_root)
     app.router.add_route('*', '/data', handle_data)
@@ -799,18 +819,15 @@ async def init_app():
     return app
 
 async def main():
-    """Main application entry point."""
     try:
         app = await init_app()
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, '0.0.0.0', PORT)
         await site.start()
-        
         logging.info(f"Server started at http://0.0.0.0:{PORT}")
         while True:
-            await asyncio.sleep(3600)  # Keep server running
-            
+            await asyncio.sleep(3600)
     except Exception as e:
         logging.error(f"Server error: {e}")
     finally:
