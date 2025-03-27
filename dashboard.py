@@ -151,157 +151,6 @@ def generate_pdf(session_data):
     logging.info(f"PDF generated: {filename}")
     return filename
 
-async def handle_data(request):
-    """Handle HTTP data requests with improved validation and state management."""
-    global data, history, device_state, data_received, session_data
-    
-    if request.method == "POST":
-        try:
-            post_data = await request.json()
-            if post_data.get("status") == "data":
-                # Validate and update sensor data
-                required_fields = ['temperature', 'humidity', 'speed', 'remaining']
-                if all(field in post_data for field in required_fields):
-                    data_received = True
-                    device_state = "running"
-                    
-                    # Update current readings
-                    data.update({field: post_data[field] for field in required_fields})
-                    
-                    # Maintain session history
-                    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-                    session_data.append({
-                        "timestamp": timestamp,
-                        **{k: post_data[k] for k in required_fields}
-                    })
-                    
-                    # Update rolling history (last MAX_HISTORY entries)
-                    for key in data:
-                        history[key].append(data[key])
-                        history[key] = history[key][-MAX_HISTORY:]
-                    history["timestamps"].append(timestamp)
-                    history["timestamps"] = history["timestamps"][-MAX_HISTORY:]
-                    
-                    logging.info(f"Received valid sensor data: {post_data}")
-                    return web.json_response({"status": "success"})
-                
-                logging.warning("Missing fields in POST data")
-                return web.json_response({"error": "Invalid data format"}, status=400)
-                
-        except json.JSONDecodeError:
-            logging.error("Invalid JSON received")
-            return web.json_response({"error": "Invalid JSON"}, status=400)
-        except Exception as e:
-            logging.error(f"Error processing data: {e}")
-            return web.json_response({"error": "Internal server error"}, status=500)
-    
-    # Return current state for GET requests
-    return web.json_response({
-        "system_status": device_state,
-        "current_readings": data,
-        "data_received": data_received,
-        "history": history,
-        "history_length": len(history["timestamps"])
-    })
-
-async def handle_setup(request):
-    """Handle device setup requests with validation."""
-    global auth_code, runtime, device_state
-    
-    try:
-        post_data = await request.json()
-        logging.debug(f"Received setup data: {post_data}")
-        
-        auth_code = post_data.get("authCode")
-        runtime = post_data.get("runtime")
-        
-        if not (1 <= auth_code <= 10) or runtime < 1:
-            return web.json_response({"error": "Invalid auth code or runtime"}, status=400)
-            
-        device_state = "waiting"
-        logging.info(f"Setup complete - Auth Code: {auth_code}, Runtime: {runtime}")
-        return web.json_response({"status": "waiting"})
-        
-    except json.JSONDecodeError:
-        return web.json_response({"error": "Invalid JSON"}, status=400)
-    except Exception as e:
-        logging.error(f"Error in setup: {e}")
-        return web.json_response({"error": str(e)}, status=500)
-
-async def handle_stop(request):
-    """Handle system stop requests."""
-    global device_state, session_data, latest_pdf
-    
-    try:
-        device_state = "stopped"
-        
-        # Generate PDF report when stopped
-        if session_data:
-            latest_pdf = generate_pdf(session_data)
-            session_data = []  # Clear session data after generating report
-            
-        logging.info("System stopped")
-        return web.json_response({"status": "stopped"})
-        
-    except Exception as e:
-        logging.error(f"Error stopping system: {e}")
-        return web.json_response({"error": str(e)}, status=500)
-
-async def handle_pdf_download(request):
-    """Handle PDF download requests."""
-    global latest_pdf, session_data
-    
-    try:
-        if not latest_pdf and session_data:
-            latest_pdf = generate_pdf(session_data)
-            
-        if not latest_pdf:
-            return web.json_response({"error": "No PDF available"}, status=404)
-            
-        return web.FileResponse(latest_pdf)
-        
-    except Exception as e:
-        logging.error(f"Error serving PDF: {e}")
-        return web.json_response({"error": str(e)}, status=500)
-
-async def handle_root(request):
-    """Serve the dashboard HTML."""
-    return web.Response(text=HTML_CONTENT, content_type='text/html')
-
-async def init_app():
-    """Initialize the web application with routes."""
-    app = web.Application()
-    
-    # Configure routes
-    app.router.add_get('/', handle_root)
-    app.router.add_route('*', '/data', handle_data)
-    app.router.add_post('/setup', handle_setup)
-    app.router.add_post('/stop', handle_stop)
-    app.router.add_get('/download_pdf', handle_pdf_download)
-    
-    return app
-
-async def main():
-    """Main application entry point."""
-    try:
-        app = await init_app()
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', PORT)
-        await site.start()
-        
-        logging.info(f"Server started at http://localhost:{PORT}")
-        while True:
-            await asyncio.sleep(3600)  # Keep server running
-            
-    except Exception as e:
-        logging.error(f"Server error: {e}")
-    finally:
-        await runner.cleanup()
-
-if __name__ == "__main__":
-    asyncio.run(main())
-
 # HTML content remains unchanged from original
 HTML_CONTENT = '''
 <!DOCTYPE html>
@@ -776,3 +625,155 @@ HTML_CONTENT = '''
 </body>
 </html>
 '''
+
+
+async def handle_data(request):
+    """Handle HTTP data requests with improved validation and state management."""
+    global data, history, device_state, data_received, session_data
+    
+    if request.method == "POST":
+        try:
+            post_data = await request.json()
+            if post_data.get("status") == "data":
+                # Validate and update sensor data
+                required_fields = ['temperature', 'humidity', 'speed', 'remaining']
+                if all(field in post_data for field in required_fields):
+                    data_received = True
+                    device_state = "running"
+                    
+                    # Update current readings
+                    data.update({field: post_data[field] for field in required_fields})
+                    
+                    # Maintain session history
+                    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+                    session_data.append({
+                        "timestamp": timestamp,
+                        **{k: post_data[k] for k in required_fields}
+                    })
+                    
+                    # Update rolling history (last MAX_HISTORY entries)
+                    for key in data:
+                        history[key].append(data[key])
+                        history[key] = history[key][-MAX_HISTORY:]
+                    history["timestamps"].append(timestamp)
+                    history["timestamps"] = history["timestamps"][-MAX_HISTORY:]
+                    
+                    logging.info(f"Received valid sensor data: {post_data}")
+                    return web.json_response({"status": "success"})
+                
+                logging.warning("Missing fields in POST data")
+                return web.json_response({"error": "Invalid data format"}, status=400)
+                
+        except json.JSONDecodeError:
+            logging.error("Invalid JSON received")
+            return web.json_response({"error": "Invalid JSON"}, status=400)
+        except Exception as e:
+            logging.error(f"Error processing data: {e}")
+            return web.json_response({"error": "Internal server error"}, status=500)
+    
+    # Return current state for GET requests
+    return web.json_response({
+        "system_status": device_state,
+        "current_readings": data,
+        "data_received": data_received,
+        "history": history,
+        "history_length": len(history["timestamps"])
+    })
+
+async def handle_setup(request):
+    """Handle device setup requests with validation."""
+    global auth_code, runtime, device_state
+    
+    try:
+        post_data = await request.json()
+        logging.debug(f"Received setup data: {post_data}")
+        
+        auth_code = post_data.get("authCode")
+        runtime = post_data.get("runtime")
+        
+        if not (1 <= auth_code <= 10) or runtime < 1:
+            return web.json_response({"error": "Invalid auth code or runtime"}, status=400)
+            
+        device_state = "waiting"
+        logging.info(f"Setup complete - Auth Code: {auth_code}, Runtime: {runtime}")
+        return web.json_response({"status": "waiting"})
+        
+    except json.JSONDecodeError:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+    except Exception as e:
+        logging.error(f"Error in setup: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+async def handle_stop(request):
+    """Handle system stop requests."""
+    global device_state, session_data, latest_pdf
+    
+    try:
+        device_state = "stopped"
+        
+        # Generate PDF report when stopped
+        if session_data:
+            latest_pdf = generate_pdf(session_data)
+            session_data = []  # Clear session data after generating report
+            
+        logging.info("System stopped")
+        return web.json_response({"status": "stopped"})
+        
+    except Exception as e:
+        logging.error(f"Error stopping system: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+async def handle_pdf_download(request):
+    """Handle PDF download requests."""
+    global latest_pdf, session_data
+    
+    try:
+        if not latest_pdf and session_data:
+            latest_pdf = generate_pdf(session_data)
+            
+        if not latest_pdf:
+            return web.json_response({"error": "No PDF available"}, status=404)
+            
+        return web.FileResponse(latest_pdf)
+        
+    except Exception as e:
+        logging.error(f"Error serving PDF: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+async def handle_root(request):
+    """Serve the dashboard HTML."""
+    return web.Response(text=HTML_CONTENT, content_type='text/html')
+
+async def init_app():
+    """Initialize the web application with routes."""
+    app = web.Application()
+    
+    # Configure routes
+    app.router.add_get('/', handle_root)
+    app.router.add_route('*', '/data', handle_data)
+    app.router.add_post('/setup', handle_setup)
+    app.router.add_post('/stop', handle_stop)
+    app.router.add_get('/download_pdf', handle_pdf_download)
+    
+    return app
+
+async def main():
+    """Main application entry point."""
+    try:
+        app = await init_app()
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', PORT)
+        await site.start()
+        
+        logging.info(f"Server started at http://localhost:{PORT}")
+        while True:
+            await asyncio.sleep(3600)  # Keep server running
+            
+    except Exception as e:
+        logging.error(f"Server error: {e}")
+    finally:
+        await runner.cleanup()
+
+if __name__ == "__main__":
+    asyncio.run(main())
