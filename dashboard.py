@@ -1,7 +1,7 @@
 import json
 import asyncio
 import logging
-import os  # This line must be present
+import os
 from aiohttp import web
 import datetime
 import matplotlib.pyplot as plt
@@ -16,7 +16,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 # Configuration constants
 PORT = int(os.environ.get("PORT", 10000))  # Use Render's assigned port
 MAX_HISTORY = 20  # Configurable history limit
-VALID_DEVICE_STATES = ["disconnected", "ready", "running", "error", "waiting", "stopped"]
+VALID_DEVICE_STATES = ["disconnected", "ready", "waiting", "running", "stopped"]
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -38,7 +38,6 @@ def generate_pdf(session_data):
     styles = getSampleStyleSheet()
     elements = []
 
-    # Add title and timestamp
     elements.append(Paragraph("Aerospin Session Report", styles['Title']))
     elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
     elements.append(Spacer(1, 12))
@@ -48,14 +47,12 @@ def generate_pdf(session_data):
         doc.build(elements)
         return filename
 
-    # Extract data for charts and tables
     timestamps = [entry["timestamp"] for entry in session_data]
     temperatures = [entry["temperature"] for entry in session_data]
     humidities = [entry["humidity"] for entry in session_data]
     speeds = [entry["speed"] for entry in session_data]
     remainings = [entry["remaining"] for entry in session_data]
 
-    # Add summary table
     summary_data = [
         ["Metric", "Minimum", "Maximum", "Average"],
         ["Temperature (°C)", f"{min(temperatures):.1f}", f"{max(temperatures):.1f}", f"{np.mean(temperatures):.1f}"],
@@ -78,7 +75,6 @@ def generate_pdf(session_data):
     elements.append(summary_table)
     elements.append(Spacer(1, 12))
 
-    # Generate charts
     plt.figure(figsize=(10, 8))
     plt.subplot(4, 1, 1)
     plt.plot(timestamps, temperatures, label='Temperature', color='red')
@@ -121,7 +117,6 @@ def generate_pdf(session_data):
     elements.append(plt_img)
     plt.close()
 
-    # Add detailed data table
     table_data = [["Timestamp", "Temperature (°C)", "Humidity (%)", "Speed (%)", "Time Remaining (s)"]]
     for entry in session_data:
         table_data.append([
@@ -152,7 +147,7 @@ def generate_pdf(session_data):
     logging.info(f"PDF generated: {filename}")
     return filename
 
-# HTML content remains unchanged from original
+# HTML content (unchanged, assumed correct as provided)
 HTML_CONTENT = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -523,39 +518,39 @@ HTML_CONTENT = '''
         });
 
         async function submitSetup() {
-    const authCode = parseInt(document.getElementById('authCode').value);
-    const runtime = parseInt(document.getElementById('runtime').value);
-    console.log("Button clicked - Auth Code:", authCode, "Runtime:", runtime);
-    if (isNaN(authCode) || authCode < 1 || authCode > 10) {
-        console.error("Invalid auth code");
-        alert("Auth code must be between 1 and 10.");
-        return;
-    }
-    if (isNaN(runtime) || runtime < 1) {
-        console.error("Invalid runtime");
-        alert("Runtime must be a positive number.");
-        return;
-    }
-    try {
-        console.log("Sending POST to /setup");
-        const response = await fetch('/setup', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ authCode: authCode, runtime: runtime })
-        });
-        const result = await response.json();
-        console.log("Server response:", result);
-        if (result.status === 'waiting') {
-            updateSystemStatus('Ready to Start');
-            document.getElementById('submitSetup').disabled = true;
-        } else {
-            console.error("Unexpected response:", result);
+            const authCode = parseInt(document.getElementById('authCode').value);
+            const runtime = parseInt(document.getElementById('runtime').value);
+            console.log("Button clicked - Auth Code:", authCode, "Runtime:", runtime);
+            if (isNaN(authCode) || authCode < 1 || authCode > 10) {
+                console.error("Invalid auth code");
+                alert("Auth code must be between 1 and 10.");
+                return;
+            }
+            if (isNaN(runtime) || runtime < 1) {
+                console.error("Invalid runtime");
+                alert("Runtime must be a positive number.");
+                return;
+            }
+            try {
+                console.log("Sending POST to /setup");
+                const response = await fetch('/setup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ authCode: authCode, runtime: runtime })
+                });
+                const result = await response.json();
+                console.log("Server response:", result);
+                if (result.status === 'waiting') {
+                    updateSystemStatus('Waiting for Device');
+                    document.getElementById('submitSetup').disabled = true;
+                } else {
+                    console.error("Unexpected response:", result);
+                }
+            } catch (error) {
+                console.error('Error submitting setup:', error);
+                alert('Failed to submit setup.');
+            }
         }
-    } catch (error) {
-        console.error('Error submitting setup:', error);
-        alert('Failed to submit setup.');
-    }
-}
 
         async function stopSystem() {
             try {
@@ -563,7 +558,6 @@ HTML_CONTENT = '''
                     method: 'POST'
                 });
                 if (response.ok) {
-                    // Force a page refresh to go back to connecting state
                     window.location.reload();
                 }
             } catch (error) {
@@ -606,13 +600,11 @@ HTML_CONTENT = '''
                     document.getElementById('remaining').innerHTML = `${data.remaining}<span class="metric-unit">s</span>`;
                     updateCharts(data);
 
-                    // Show/hide buttons based on state
                     document.getElementById('stopButton').style.display = 
-                        (data.state === 'running' || data.state === 'waiting_code' || data.state === 'waiting') ? 'block' : 'none';
+                        (data.state === 'running' || data.state === 'waiting' || data.state === 'ready') ? 'block' : 'none';
                     document.getElementById('downloadPdf').style.display = 
                         data.state === 'stopped' && data.history.timestamps.length > 0 ? 'block' : 'none';
 
-                    // Auto-download PDF when stopped
                     if (data.state === 'stopped' && data.history.timestamps.length > 0) {
                         downloadPdf();
                     }
@@ -627,7 +619,6 @@ HTML_CONTENT = '''
 </html>
 '''
 
-
 async def handle_data(request):
     """Handle HTTP data requests with improved validation and state management."""
     global data, history, device_state, data_received, session_data
@@ -635,24 +626,32 @@ async def handle_data(request):
     if request.method == "POST":
         try:
             post_data = await request.json()
-            if post_data.get("status") == "data":
-                # Validate and update sensor data
+            status = post_data.get("status")
+            logging.debug(f"Received POST data: {post_data}")
+
+            if status == "data":
                 required_fields = ['temperature', 'humidity', 'speed', 'remaining']
                 if all(field in post_data for field in required_fields):
+                    # Validate data types
+                    if not (isinstance(post_data["temperature"], (int, float)) and 
+                            isinstance(post_data["humidity"], (int, float)) and 
+                            isinstance(post_data["speed"], int) and 
+                            isinstance(post_data["remaining"], int)):
+                        logging.warning("Invalid data types in POST data")
+                        return web.json_response({"error": "Invalid data types"}, status=400)
+
                     data_received = True
                     device_state = "running"
+                    logging.info(f"State transitioned to: {device_state}")
                     
-                    # Update current readings
                     data.update({field: post_data[field] for field in required_fields})
                     
-                    # Maintain session history
                     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
                     session_data.append({
                         "timestamp": timestamp,
                         **{k: post_data[k] for k in required_fields}
                     })
                     
-                    # Update rolling history (last MAX_HISTORY entries)
                     for key in data:
                         history[key].append(data[key])
                         history[key] = history[key][-MAX_HISTORY:]
@@ -660,10 +659,25 @@ async def handle_data(request):
                     history["timestamps"] = history["timestamps"][-MAX_HISTORY:]
                     
                     logging.info(f"Received valid sensor data: {post_data}")
-                    return web.json_response({"status": "success"})
+                    return web.json_response({"status": "success", "state": device_state})
                 
                 logging.warning("Missing fields in POST data")
-                return web.json_response({"error": "Invalid data format"}, status=400)
+                return web.json_response({"error": "Missing required fields"}, status=400)
+            
+            elif status == "arduino_ready":
+                device_state = "ready"
+                logging.info(f"State transitioned to: {device_state}")
+                return web.json_response({"status": "ready", "state": device_state})
+            
+            elif status == "start":
+                device_state = "running"
+                logging.info(f"State transitioned to: {device_state}")
+                return web.json_response({"status": "running", "state": device_state})
+            
+            elif status == "stopped":
+                device_state = "stopped"
+                logging.info(f"State transitioned to: {device_state}")
+                return web.json_response({"status": "stopped", "state": device_state})
                 
         except json.JSONDecodeError:
             logging.error("Invalid JSON received")
@@ -674,11 +688,13 @@ async def handle_data(request):
     
     # Return current state for GET requests
     return web.json_response({
-        "system_status": device_state,
-        "current_readings": data,
+        "state": device_state,
+        "temperature": data["temperature"],
+        "humidity": data["humidity"],
+        "speed": data["speed"],
+        "remaining": data["remaining"],
         "data_received": data_received,
-        "history": history,
-        "history_length": len(history["timestamps"])
+        "history": history
     })
 
 async def handle_setup(request):
@@ -692,14 +708,16 @@ async def handle_setup(request):
         auth_code = post_data.get("authCode")
         runtime = post_data.get("runtime")
         
-        if not (1 <= auth_code <= 10) or runtime < 1:
+        if not (isinstance(auth_code, int) and 1 <= auth_code <= 10) or not (isinstance(runtime, int) and runtime > 0):
+            logging.warning(f"Invalid setup data - authCode: {auth_code}, runtime: {runtime}")
             return web.json_response({"error": "Invalid auth code or runtime"}, status=400)
             
         device_state = "waiting"
-        logging.info(f"Setup complete - Auth Code: {auth_code}, Runtime: {runtime}")
-        return web.json_response({"status": "waiting"})
+        logging.info(f"Setup complete - Auth Code: {auth_code}, Runtime: {runtime}, State: {device_state}")
+        return web.json_response({"status": "waiting", "state": device_state})
         
     except json.JSONDecodeError:
+        logging.error("Invalid JSON in setup request")
         return web.json_response({"error": "Invalid JSON"}, status=400)
     except Exception as e:
         logging.error(f"Error in setup: {e}")
@@ -707,18 +725,17 @@ async def handle_setup(request):
 
 async def handle_stop(request):
     """Handle system stop requests."""
-    global device_state, session_data, latest_pdf
+    global device_state, session_data, latest_pdf, auth_code, runtime
     
     try:
         device_state = "stopped"
-        
-        # Generate PDF report when stopped
         if session_data:
             latest_pdf = generate_pdf(session_data)
-            session_data = []  # Clear session data after generating report
-            
-        logging.info("System stopped")
-        return web.json_response({"status": "stopped"})
+            session_data = []
+        auth_code = None
+        runtime = None
+        logging.info(f"System stopped, state reset - State: {device_state}")
+        return web.json_response({"status": "stopped", "state": device_state})
         
     except Exception as e:
         logging.error(f"Error stopping system: {e}")
@@ -733,6 +750,7 @@ async def handle_pdf_download(request):
             latest_pdf = generate_pdf(session_data)
             
         if not latest_pdf:
+            logging.warning("No PDF available for download")
             return web.json_response({"error": "No PDF available"}, status=404)
             
         return web.FileResponse(latest_pdf)
@@ -748,14 +766,11 @@ async def handle_root(request):
 async def init_app():
     """Initialize the web application with routes."""
     app = web.Application()
-    
-    # Configure routes
     app.router.add_get('/', handle_root)
     app.router.add_route('*', '/data', handle_data)
     app.router.add_post('/setup', handle_setup)
     app.router.add_post('/stop', handle_stop)
     app.router.add_get('/download_pdf', handle_pdf_download)
-    
     return app
 
 async def main():
@@ -767,7 +782,7 @@ async def main():
         site = web.TCPSite(runner, '0.0.0.0', PORT)
         await site.start()
         
-        logging.info(f"Server started at http://localhost:{PORT}")
+        logging.info(f"Server started at http://0.0.0.0:{PORT}")
         while True:
             await asyncio.sleep(3600)  # Keep server running
             
