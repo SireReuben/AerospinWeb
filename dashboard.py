@@ -121,7 +121,7 @@ HTML_CONTENT = '''
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
-    <script async defer src="https://maps.googleapis.com/maps/api/js?key=''' + GOOGLE_API_KEY + '''&libraries=places,marker&callback=initMap"></script>
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=''' + GOOGLE_API_KEY + '''&libraries=places,marker&v=weekly&callback=initMap"></script>
     <style>
         /* Your existing styles remain unchanged */
         :root {
@@ -590,28 +590,30 @@ HTML_CONTENT = '''
         }
 
         function initMap() {
-            if (!window.google || !window.google.maps) {
-                console.error("Google Maps API not loaded yet.");
-                return;
-            }
-            map = new google.maps.Map(document.getElementById('map'), {
-                center: { lat: 20, lng: 54 },
-                zoom: 2,
-                mapTypeId: 'roadmap',
-                styles: [
-                    {
-                        "featureType": "all",
-                        "elementType": "all",
-                        "stylers": [
-                            { "saturation": -20 },
-                            { "lightness": 10 }
-                        ]
-                    }
+    if (!window.google || !window.google.maps) {
+        console.error("Google Maps API not loaded yet. Retrying in 1 second...");
+        setTimeout(initMap, 1000);
+        return;
+    }
+    map = new google.maps.Map(document.getElementById('map'), {
+        center: { lat: 20, lng: 54 },
+        zoom: 2,
+        mapTypeId: 'roadmap',
+        mapId: 'YOUR_MAP_ID_HERE', // Replace with your Map ID
+        styles: [
+            {
+                "featureType": "all",
+                "elementType": "all",
+                "stylers": [
+                    { "saturation": -20 },
+                    { "lightness": 10 }
                 ]
-            });
-            isMapInitialized = true;
-            console.log("Map initialized successfully");
-        }
+            }
+        ]
+    });
+    isMapInitialized = true;
+    console.log("Map initialized successfully");
+}
 
         function updateMap(latitude, longitude) {
             if (!isMapInitialized || !window.google || !window.google.maps || !map) {
