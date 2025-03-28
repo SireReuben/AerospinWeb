@@ -1131,10 +1131,10 @@ async def handle_data(request):
                     )
                 
                 # Validate data types
-                if not (isinstance(post_data["temperature"], (int, float)) or \
-                   not isinstance(post_data["humidity"], (int, float)) or \
-                   not isinstance(post_data["speed"], int) or \
-                   not isinstance(post_data["remaining"], int):
+                if not (isinstance(post_data["temperature"], (int, float)) and 
+        isinstance(post_data["humidity"], (int, float)) and 
+        isinstance(post_data["speed"], int) and 
+        isinstance(post_data["remaining"], int)):
                     logging.warning(f"Invalid data types from {client_ip}")
                     return web.json_response(
                         {"error": "Invalid data types"}, 
