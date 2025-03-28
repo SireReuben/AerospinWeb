@@ -121,8 +121,9 @@ HTML_CONTENT = '''
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
-    <script async defer src="https://maps.googleapis.com/maps/api/js?key=''' + GOOGLE_API_KEY + '''&libraries=places&callback=initMap"></script>
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=''' + GOOGLE_API_KEY + '''&libraries=places,marker&callback=initMap"></script>
     <style>
+        /* Your existing styles remain unchanged */
         :root {
             --primary: #4361ee;
             --secondary: #3a0ca3;
@@ -489,6 +490,7 @@ HTML_CONTENT = '''
         let tempChart, humidChart, speedChart, remainingChart;
         let map, marker;
         let previousState = "disconnected";
+        let isMapInitialized = false;
 
         function initCharts() {
             const commonOptions = {
@@ -588,6 +590,10 @@ HTML_CONTENT = '''
         }
 
         function initMap() {
+            if (!window.google || !window.google.maps) {
+                console.error("Google Maps API not loaded yet.");
+                return;
+            }
             map = new google.maps.Map(document.getElementById('map'), {
                 center: { lat: 20, lng: 54 },
                 zoom: 2,
@@ -603,12 +609,18 @@ HTML_CONTENT = '''
                     }
                 ]
             });
+            isMapInitialized = true;
+            console.log("Map initialized successfully");
         }
 
         function updateMap(latitude, longitude) {
+            if (!isMapInitialized || !window.google || !window.google.maps || !map) {
+                console.error("Map not initialized yet or Google Maps API not loaded.");
+                return;
+            }
             if (latitude && longitude) {
                 console.log(`Updating map to Arduino location: Lat ${latitude}, Lon ${longitude}`);
-                const position = { lat: latitude, lng: longitude };
+                const position = { lat: parseFloat(latitude), lng: parseFloat(longitude) };
                 
                 if (!marker) {
                     marker = new google.maps.marker.AdvancedMarkerElement({
