@@ -121,7 +121,7 @@ HTML_CONTENT = '''
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
-    <script src="https://maps.googleapis.com/maps/api/js?key=''' + GOOGLE_API_KEY + '''&libraries=places"></script>
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=''' + GOOGLE_API_KEY + '''&libraries=places&callback=initMap"></script>
     <style>
         :root {
             --primary: #4361ee;
@@ -432,20 +432,20 @@ HTML_CONTENT = '''
                     </div>
                 </div>
                 <div class="col-md-3">
+                    <div class="metric-card remaining">
+                        <div class="metric-title"><i class="ri-time-line"></i> Time Remaining</div>
+                        <div id="remaining" class="metric-value">0<span class="metric-unit">s</span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-3">
                     <div class="metric-card vpn-status">
                         <div class="metric-title"><i class="ri-shield-check-line"></i> VPN Status</div>
                         <div id="vpnStatus" class="metric-value vpn-tooltip">
                             Unknown
                             <span class="tooltip-text" id="vpnDetails">No data yet</span>
                         </div>
-                    </div>
-                </div>
-            </div>
-            <div class="row">
-                <div class="col-md-3">
-                    <div class="metric-card remaining">
-                        <div class="metric-title"><i class="ri-time-line"></i> Time Remaining</div>
-                        <div id="remaining" class="metric-value">0<span class="metric-unit">s</span></div>
                     </div>
                 </div>
                 <div class="col-md-3"><div class="chart-container"><canvas id="tempChart"></canvas></div></div>
@@ -479,6 +479,9 @@ HTML_CONTENT = '''
                         <div id="map"></div>
                     </div>
                 </div>
+            </div>
+            <div class="row">
+                <div class="col-md-12"><div class="chart-container"><canvas id="remainingChart"></canvas></div></div>
             </div>
         </div>
     </div>
@@ -639,7 +642,7 @@ HTML_CONTENT = '''
 
         document.addEventListener('DOMContentLoaded', function() {
             initCharts();
-            initMap();
+            // initMap() is now called via callback in the script tag
             document.getElementById('submitSetup').addEventListener('click', submitSetup);
             document.getElementById('stopButton').addEventListener('click', stopSystem);
             document.getElementById('downloadPdf').addEventListener('click', downloadPdf);
