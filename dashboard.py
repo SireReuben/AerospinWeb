@@ -26,7 +26,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("server.log")  # Log to a file for debugging
+        logging.FileHandler("server.log")
     ]
 )
 
@@ -61,7 +61,7 @@ async def get_gps_from_ip(ip_address):
                             "accuracy": accuracy
                         }
         
-        # Fallback to IP-API.com (free service)
+        # Fallback to IP-API.com
         ip_url = f"http://ip-api.com/json/{ip_address}?fields=status,message,lat,lon"
         async with ClientSession() as session:
             async with session.get(ip_url) as response:
@@ -216,8 +216,7 @@ HTML_CONTENT = '''
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=''' + GOOGLE_API_KEY + '''&libraries=places"></script>
     <style>
         :root {
             --primary: #4361ee;
@@ -332,7 +331,7 @@ HTML_CONTENT = '''
         .metric-card:hover {
             transform: translateY(-8px) scale(1.02);
             box-shadow: 
-                0 15npx 30px rgba(0, 0, 0, 0.3), 
+                0 15px 30px rgba(0, 0, 0, 0.3), 
                 0 0 20px rgba(67, 97, 238, 0.2);
         }
         .metric-title {
@@ -461,17 +460,23 @@ HTML_CONTENT = '''
                 0 0 0 3px rgba(67, 97, 238, 0.3),
                 0 0 0 1px rgba(67, 97, 238, 0.8);
         }
-        #map { height: 100%; width: 100%; }
+        #map { 
+            height: 100%; 
+            width: 100%; 
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
         .location-marker {
-            background: none;
-            border: none;
+            position: relative;
+            width: 20px;
+            height: 20px;
         }
         .pulse-marker {
             width: 20px;
             height: 20px;
             border-radius: 50%;
             background: #136aec;
-            position: relative;
+            position: absolute;
             box-shadow: 0 0 0 0 rgba(19, 106, 236, 0.7);
             animation: pulse 1.5s infinite;
         }
@@ -736,13 +741,21 @@ HTML_CONTENT = '''
         }
 
         function initMap() {
-            map = L.map('map').setView([20, 54], 2);  // Default view
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-                maxZoom: 18
-            }).addTo(map);
-            
-            L.control.scale().addTo(map);
+            map = new google.maps.Map(document.getElementById('map'), {
+                center: { lat: 20, lng: 54 },
+                zoom: 2,
+                mapTypeId: 'roadmap',
+                styles: [
+                    {
+                        "featureType": "all",
+                        "elementType": "all",
+                        "stylers": [
+                            { "saturation": -20 },
+                            { "lightness": 10 }
+                        ]
+                    }
+                ]
+            });
             getPreciseLocation();
         }
 
@@ -778,50 +791,66 @@ HTML_CONTENT = '''
             if (latitude && longitude) {
                 console.log(`Updating map to: Lat ${latitude}, Lon ${longitude}`);
                 
-                if (!marker) {
-                    marker = L.marker([latitude, longitude], {
-                        icon: L.divIcon({
-                            className: 'location-marker',
-                            html: '<div class="pulse-marker"></div>',
-                            iconSize: [20, 20]
-                        })
-                    }).addTo(map);
-                } else {
-                    marker.setLatLng([latitude, longitude]);
-                }
+                const position = { lat: latitude, lng: longitude };
                 
+                if (!marker) {
+                    marker = new google.maps.Marker({
+                        position: position,
+                        map: map,
+                        icon: {
+                            path: google.maps.SymbolPath.CIRCLE,
+                            scale: 10,
+                            fillColor: userLocation?.source === 'browser' ? '#4ade80' : '#f59e0b',
+                            fillOpacity: 0.8,
+                            strokeWeight: 2,
+                            strokeColor: '#136aec'
+                        }
+                    });
+                } else {
+                    marker.setPosition(position);
+                }
+
                 const zoom = userLocation?.accuracy ? 
                     Math.max(10, Math.round(14 - Math.log2(userLocation.accuracy / 50))) : 
                     13;
                     
-                map.setView([latitude, longitude], zoom);
-                
+                map.setCenter(position);
+                map.setZoom(zoom);
+
                 if (userLocation?.accuracy) {
                     if (window.accuracyCircle) {
-                        map.removeLayer(window.accuracyCircle);
+                        window.accuracyCircle.setMap(null);
                     }
-                    window.accuracyCircle = L.circle([latitude, longitude], {
+                    window.accuracyCircle = new google.maps.Circle({
+                        center: position,
                         radius: userLocation.accuracy,
-                        color: '#136aec',
+                        map: map,
                         fillColor: '#136aec',
-                        fillOpacity: 0.15
-                    }).addTo(map);
+                        fillOpacity: 0.15,
+                        strokeColor: '#136aec',
+                        strokeOpacity: 0.8,
+                        strokeWeight: 1
+                    });
                 }
             }
         }
 
         function updateLocationMarker(isPrecise) {
             if (marker) {
-                marker.setIcon(L.divIcon({
-                    className: `location-marker ${isPrecise ? 'precise' : 'approximate'}`,
-                    html: `<div class="pulse-marker"></div><div class="accuracy-text">${
-                        isPrecise ? 'Your location' : 'Approximate location'
-                    }</div>`,
-                    iconSize: [20, 20]
-                }));
-                
+                marker.setIcon({
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: 10,
+                    fillColor: isPrecise ? '#4ade80' : '#f59e0b',
+                    fillOpacity: 0.8,
+                    strokeWeight: 2,
+                    strokeColor: '#136aec'
+                });
+
                 if (!isPrecise) {
-                    marker.bindPopup("Location is approximate (based on IP address)").openPopup();
+                    const infoWindow = new google.maps.InfoWindow({
+                        content: "Location is approximate (based on IP address)"
+                    });
+                    infoWindow.open(map, marker);
                 }
             }
         }
@@ -1026,7 +1055,6 @@ HTML_CONTENT = '''
 async def handle_data(request):
     global data, history, device_state, data_received, session_data, gps_coords
     
-    # Handle CORS preflight requests
     if request.method == "OPTIONS":
         return web.Response(
             headers={
@@ -1086,7 +1114,6 @@ async def handle_data(request):
                 )
             
             elif status == "data":
-                # Handle client-side geolocation if provided
                 if "latitude" in post_data and "longitude" in post_data:
                     gps_coords = {
                         "latitude": post_data["latitude"],
@@ -1096,17 +1123,14 @@ async def handle_data(request):
                     }
                     logging.info(f"Received browser geolocation: {gps_coords}")
                 
-                # Always attempt IP geolocation if public_ip is provided
                 elif "public_ip" in post_data:
                     coords = await get_gps_from_ip(post_data["public_ip"])
                     if coords["latitude"] is not None:
                         gps_coords = coords
                         logging.info(f"Updated location from IP: {gps_coords}")
 
-                # Validate and process sensor data
                 required_fields = ['temperature', 'humidity', 'speed', 'remaining']
                 if all(field in post_data for field in required_fields):
-                    # Validate data types
                     if not (isinstance(post_data["temperature"], (int, float)) and 
                             isinstance(post_data["humidity"], (int, float)) and 
                             isinstance(post_data["speed"], int) and 
@@ -1118,15 +1142,12 @@ async def handle_data(request):
                             headers={"Access-Control-Allow-Origin": "*"}
                         )
 
-                    # Update system state and data
                     data_received = True
                     device_state = "running"
                     logging.info(f"Arduino data received, state transitioned to: {device_state}")
                     
-                    # Update current data
                     data.update({field: post_data[field] for field in required_fields})
                     
-                    # Create and store session record
                     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
                     session_record = {
                         "timestamp": timestamp,
@@ -1135,7 +1156,6 @@ async def handle_data(request):
                     }
                     session_data.append(session_record)
                     
-                    # Update history (for charts)
                     for key in data:
                         history[key].append(data[key])
                         history[key] = history[key][-MAX_HISTORY:]
@@ -1174,7 +1194,6 @@ async def handle_data(request):
                 headers={"Access-Control-Allow-Origin": "*"}
             )
     
-    # Handle GET requests
     logging.debug(f"GET request received, current state: {device_state}")
     return web.json_response({
         "state": device_state,
