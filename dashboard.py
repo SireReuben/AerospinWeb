@@ -13,7 +13,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
-PORT = int(os.environ.get("PORT", 10000))
+PORT = int(os.environ.get("PORT", 10000))  # Use environment variable for cloud hosting
 MAX_HISTORY = 20
 VALID_DEVICE_STATES = ["disconnected", "ready", "waiting", "running", "stopped"]
 VALID_AUTH_CODE_MIN = 100
@@ -33,7 +33,7 @@ gps_coords = {"latitude": None, "longitude": None}
 
 async def get_gps_from_ip(ip_address):
     url = f"https://www.googleapis.com/geolocation/v1/geolocate?key={GOOGLE_API_KEY}"
-    payload = {"considerIp": True}
+    payload = {"considerIp": False, "homeMobileCountryCode": None, "homeMobileNetworkCode": None, "radioType": None, "carrier": None, "ip": ip_address}
     async with ClientSession() as session:
         async with session.post(url, json=payload) as response:
             if response.status == 200:
@@ -45,7 +45,7 @@ async def get_gps_from_ip(ip_address):
                 }
             else:
                 error_text = await response.text()
-                logging.error(f"Geolocation API error: {response.status} - {error_text}")
+                logging.error(f"Geolocation API error for IP {ip_address}: {response.status} - {error_text}")
                 return {"latitude": 51.505, "longitude": -0.09}  # Fallback to London
 
 def generate_pdf(session_data):
@@ -663,6 +663,7 @@ HTML_CONTENT = '''
         }
 
         function updateMap(latitude, longitude) {
+            console.log(`Updating map to: Lat ${latitude}, Lon ${longitude}`);
             if (!marker) {
                 marker = L.marker([latitude, longitude]).addTo(map);
             } else {
@@ -782,6 +783,7 @@ HTML_CONTENT = '''
             try {
                 const response = await fetch('/data');
                 const data = await response.json();
+                console.log("Fetched data:", data);  // Log full response for debugging
                 const currentState = data.state;
 
                 updateSystemStatus(currentState.charAt(0).toUpperCase() + currentState.slice(1), currentState === 'running');
@@ -795,6 +797,8 @@ HTML_CONTENT = '''
 
                     if (data.gps.latitude && data.gps.longitude) {
                         updateMap(data.gps.latitude, data.gps.longitude);
+                    } else {
+                        console.warn("No GPS coordinates received");
                     }
                 }
 
@@ -845,10 +849,10 @@ async def handle_data(request):
                         return web.json_response({"error": "Invalid data types"}, status=400)
 
                     public_ip = post_data.get("public_ip")
-                    if public_ip and gps_coords["latitude"] is None:
+                    if public_ip and gps_coords["latitude"] is None:  # Only fetch once
                         coords = await get_gps_from_ip(public_ip)
                         gps_coords = coords
-                        logging.info(f"GPS Coordinates fetched: {gps_coords}")
+                        logging.info(f"GPS Coordinates fetched for IP {public_ip}: {gps_coords}")
 
                     data_received = True
                     device_state = "running"
