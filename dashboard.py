@@ -13,7 +13,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
-PORT = int(os.environ.get("PORT", 10000))  # Use environment variable for cloud hosting
+PORT = int(os.environ.get("PORT", 10000))
 MAX_HISTORY = 20
 VALID_DEVICE_STATES = ["disconnected", "ready", "waiting", "running", "stopped"]
 VALID_AUTH_CODE_MIN = 100
@@ -29,24 +29,46 @@ device_state = "disconnected"
 session_data = []
 auth_code = None
 runtime = None
-gps_coords = {"latitude": None, "longitude": None}
+gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": None}
 
 async def get_gps_from_ip(ip_address):
-    url = f"https://www.googleapis.com/geolocation/v1/geolocate?key={GOOGLE_API_KEY}"
-    payload = {"considerIp": False, "homeMobileCountryCode": None, "homeMobileNetworkCode": None, "radioType": None, "carrier": None, "ip": ip_address}
-    async with ClientSession() as session:
-        async with session.post(url, json=payload) as response:
-            if response.status == 200:
-                data = await response.json()
-                logging.info(f"Geolocation API response for IP {ip_address}: {data}")
-                return {
-                    "latitude": data["location"]["lat"],
-                    "longitude": data["location"]["lng"]
-                }
-            else:
-                error_text = await response.text()
-                logging.error(f"Geolocation API error for IP {ip_address}: {response.status} - {error_text}")
-                return {"latitude": 51.505, "longitude": -0.09}  # Fallback to London
+    """Improved geolocation with multiple fallbacks"""
+    try:
+        # Try Google Geolocation API first
+        url = f"https://www.googleapis.com/geolocation/v1/geolocate?key={GOOGLE_API_KEY}"
+        payload = {"considerIp": True}
+        
+        async with ClientSession() as session:
+            async with session.post(url, json=payload) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    accuracy = data.get("accuracy", 0)
+                    if accuracy < 50000:  # Only accept if accuracy < 50km
+                        return {
+                            "latitude": data["location"]["lat"],
+                            "longitude": data["location"]["lng"],
+                            "source": "google_geolocation",
+                            "accuracy": accuracy
+                        }
+        
+        # Fallback to IP-API.com (free service)
+        ip_url = f"http://ip-api.com/json/{ip_address}?fields=status,message,lat,lon"
+        async with ClientSession() as session:
+            async with session.get(ip_url) as response:
+                if response.status == 200:
+                    ip_data = await response.json()
+                    if ip_data.get("status") == "success":
+                        return {
+                            "latitude": ip_data["lat"],
+                            "longitude": ip_data["lon"],
+                            "source": "ip_api",
+                            "accuracy": 50000  # IP-based is less accurate
+                        }
+    
+    except Exception as e:
+        logging.error(f"Geolocation error: {e}")
+    
+    return {"latitude": None, "longitude": None, "source": None, "accuracy": None}
 
 def generate_pdf(session_data):
     filename = f"aerospin_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
@@ -57,7 +79,8 @@ def generate_pdf(session_data):
     elements.append(Paragraph("Aerospin Session Report", styles['Title']))
     elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
     if gps_coords["latitude"] and gps_coords["longitude"]:
-        elements.append(Paragraph(f"Location: Lat {gps_coords['latitude']:.6f}, Lon {gps_coords['longitude']:.6f}", styles['Normal']))
+        elements.append(Paragraph(f"Location: Lat {gps_coords['latitude']:.6f}, Lon {gps_coords['longitude']:.6f} "
+                                f"(Source: {gps_coords['source']}, Accuracy: {gps_coords['accuracy']}m)", styles['Normal']))
     elements.append(Spacer(1, 12))
 
     if not session_data:
@@ -294,7 +317,7 @@ HTML_CONTENT = '''
         .metric-card:hover {
             transform: translateY(-8px) scale(1.02);
             box-shadow: 
-                0 15px 30px rgba(0, 0, 0, 0.3), 
+                0 15npx 30px rgba(0, 0, 0, 0.3), 
                 0 0 20px rgba(67, 97, 238, 0.2);
         }
         .metric-title {
@@ -424,6 +447,47 @@ HTML_CONTENT = '''
                 0 0 0 1px rgba(67, 97, 238, 0.8);
         }
         #map { height: 100%; width: 100%; }
+        .location-marker {
+            background: none;
+            border: none;
+        }
+        .pulse-marker {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #136aec;
+            position: relative;
+            box-shadow: 0 0 0 0 rgba(19, 106, 236, 0.7);
+            animation: pulse 1.5s infinite;
+        }
+        .location-marker.precise .pulse-marker {
+            background: #4ade80;
+            animation: pulse 1.5s infinite, colorPulse 3s infinite;
+        }
+        .location-marker.approximate .pulse-marker {
+            background: #f59e0b;
+        }
+        .accuracy-text {
+            position: absolute;
+            white-space: nowrap;
+            font-size: 12px;
+            color: white;
+            background: rgba(0,0,0,0.7);
+            padding: 2px 6px;
+            border-radius: 10px;
+            top: 25px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(19, 106, 236, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(19, 106, 236, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(19, 106, 236, 0); }
+        }
+        @keyframes colorPulse {
+            0%, 100% { background: #4ade80; }
+            50% { background: #22d3ee; }
+        }
         @media (max-width: 768px) {
             .metric-card, .chart-container {
                 margin-bottom: 15px;
@@ -503,6 +567,8 @@ HTML_CONTENT = '''
     <script>
         let tempChart, humidChart, speedChart, remainingChart;
         let map, marker;
+        let userLocation = null;
+        let locationAttempted = false;
         let previousState = "disconnected";
 
         function initCharts() {
@@ -656,20 +722,94 @@ HTML_CONTENT = '''
         }
 
         function initMap() {
-            map = L.map('map').setView([0, 0], 2);
+            map = L.map('map').setView([20, 54], 2);  // Centered on Middle East
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                maxZoom: 18
             }).addTo(map);
+            
+            L.control.scale().addTo(map);
+            getPreciseLocation();
+        }
+
+        function getPreciseLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        userLocation = {
+                            latitude: position.coords.latitude,
+                            longitude: position.coords.longitude,
+                            accuracy: position.coords.accuracy,
+                            source: 'browser'
+                        };
+                        updateMap(userLocation.latitude, userLocation.longitude);
+                        updateLocationMarker(true);
+                    },
+                    (error) => {
+                        console.warn("Geolocation error:", error);
+                        updateLocationMarker(false);
+                    },
+                    {
+                        enableHighAccuracy: true,
+                        timeout: 10000,
+                        maximumAge: 0
+                    }
+                );
+            } else {
+                updateLocationMarker(false);
+            }
         }
 
         function updateMap(latitude, longitude) {
-            console.log(`Updating map to: Lat ${latitude}, Lon ${longitude}`);
-            if (!marker) {
-                marker = L.marker([latitude, longitude]).addTo(map);
-            } else {
-                marker.setLatLng([latitude, longitude]);
+            if (latitude && longitude) {
+                console.log(`Updating map to: Lat ${latitude}, Lon ${longitude}`);
+                
+                if (!marker) {
+                    marker = L.marker([latitude, longitude], {
+                        icon: L.divIcon({
+                            className: 'location-marker',
+                            html: '<div class="pulse-marker"></div>',
+                            iconSize: [20, 20]
+                        })
+                    }).addTo(map);
+                } else {
+                    marker.setLatLng([latitude, longitude]);
+                }
+                
+                const zoom = userLocation?.accuracy ? 
+                    Math.max(10, Math.round(14 - Math.log2(userLocation.accuracy / 50))) : 
+                    13;
+                    
+                map.setView([latitude, longitude], zoom);
+                
+                if (userLocation?.accuracy) {
+                    if (window.accuracyCircle) {
+                        map.removeLayer(window.accuracyCircle);
+                    }
+                    window.accuracyCircle = L.circle([latitude, longitude], {
+                        radius: userLocation.accuracy,
+                        color: '#136aec',
+                        fillColor: '#136aec',
+                        fillOpacity: 0.15
+                    }).addTo(map);
+                }
             }
-            map.setView([latitude, longitude], 13);
+        }
+
+        function updateLocationMarker(isPrecise) {
+            if (marker) {
+                marker.setIcon(L.divIcon({
+                    className: `location-marker ${isPrecise ? 'precise' : 'approximate'}`,
+                    html: `<div class="pulse-marker"></div><div class="accuracy-text">${
+                        isPrecise ? 'Your location' : 'Approximate location'
+                    }</div>`,
+                    iconSize: [20, 20]
+                }));
+                
+                if (!isPrecise) {
+                    marker.bindPopup("Location is approximate (based on IP address)").openPopup();
+                }
+            }
         }
 
         function updateSystemStatus(status, isActive = false) {
@@ -783,7 +923,7 @@ HTML_CONTENT = '''
             try {
                 const response = await fetch('/data');
                 const data = await response.json();
-                console.log("Fetched data:", data);  // Log full response for debugging
+                console.log("Fetched data:", data);
                 const currentState = data.state;
 
                 updateSystemStatus(currentState.charAt(0).toUpperCase() + currentState.slice(1), currentState === 'running');
@@ -795,10 +935,17 @@ HTML_CONTENT = '''
                     document.getElementById('remaining').innerHTML = `${data.remaining}<span class="metric-unit">s</span>`;
                     updateCharts(data);
 
-                    if (data.gps.latitude && data.gps.longitude) {
-                        updateMap(data.gps.latitude, data.gps.longitude);
-                    } else {
-                        console.warn("No GPS coordinates received");
+                    if (data.gps?.latitude && data.gps?.longitude) {
+                        if (!userLocation || data.gps.source === 'browser_geolocation') {
+                            userLocation = {
+                                latitude: data.gps.latitude,
+                                longitude: data.gps.longitude,
+                                accuracy: data.gps.accuracy || 50000,
+                                source: data.gps.source || 'ip'
+                            };
+                            updateMap(userLocation.latitude, userLocation.longitude);
+                            updateLocationMarker(data.gps.source === 'browser_geolocation');
+                        }
                     }
                 }
 
@@ -839,6 +986,20 @@ async def handle_data(request):
             logging.debug(f"Received POST data: {post_data}")
 
             if status == "data":
+                # Handle client-side geolocation if provided
+                if "latitude" in post_data and "longitude" in post_data:
+                    gps_coords = {
+                        "latitude": post_data["latitude"],
+                        "longitude": post_data["longitude"],
+                        "source": "browser_geolocation",
+                        "accuracy": post_data.get("accuracy", 0)
+                    }
+                # Fallback to IP geolocation if no client-side geolocation
+                elif "public_ip" in post_data and (gps_coords["latitude"] is None or gps_coords.get("accuracy", float('inf')) > 50000):
+                    coords = await get_gps_from_ip(post_data["public_ip"])
+                    if coords["latitude"] is not None:
+                        gps_coords = coords
+
                 required_fields = ['temperature', 'humidity', 'speed', 'remaining']
                 if all(field in post_data for field in required_fields):
                     if not (isinstance(post_data["temperature"], (int, float)) and 
@@ -847,12 +1008,6 @@ async def handle_data(request):
                             isinstance(post_data["remaining"], int)):
                         logging.warning("Invalid data types in POST data")
                         return web.json_response({"error": "Invalid data types"}, status=400)
-
-                    public_ip = post_data.get("public_ip")
-                    if public_ip and gps_coords["latitude"] is None:  # Only fetch once
-                        coords = await get_gps_from_ip(public_ip)
-                        gps_coords = coords
-                        logging.info(f"GPS Coordinates fetched for IP {public_ip}: {gps_coords}")
 
                     data_received = True
                     device_state = "running"
@@ -864,8 +1019,7 @@ async def handle_data(request):
                     session_data.append({
                         "timestamp": timestamp,
                         **{k: post_data[k] for k in required_fields},
-                        "latitude": gps_coords["latitude"],
-                        "longitude": gps_coords["longitude"]
+                        **gps_coords
                     })
                     
                     for key in data:
@@ -961,7 +1115,7 @@ async def handle_stop(request):
         data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
         history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
         data_received = False
-        gps_coords = {"latitude": None, "longitude": None}
+        gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": None}
         logging.info(f"System stopped, state and metrics reset - State: {device_state}")
         return web.json_response({"status": "stopped", "state": device_state})
         
@@ -980,7 +1134,7 @@ async def handle_reset(request):
         data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
         history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
         data_received = False
-        gps_coords = {"latitude": None, "longitude": None}
+        gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": None}
         logging.info(f"System reset for new session - State: {device_state}")
         return web.json_response({"status": "disconnected", "state": device_state})
         
