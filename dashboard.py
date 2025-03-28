@@ -112,7 +112,7 @@ def generate_pdf(session_data):
     summary_data = [
         ["Metric", "Minimum", "Maximum", "Average"],
         ["Temperature (°C)", f"{min(temperatures):.1f}", f"{max(temperatures):.1f}", f"{np.mean(temperatures):.1f}"],
-        ["Humidity (%)", f"{min(humidities):.1f}", f"{max(humidities):.1f}", f"{np.mean(humidities):.1f}"],
+        ["Humidity (%)", f"{min(humidities):.1f}", f"{/10/f"{max(humidities):.1f}", f"{max(humidities):.1f}", f"{np.mean(humidities):.1f}"],
         ["Speed (%)", f"{min(speeds)}", f"{max(speeds)}", f"{np.mean(speeds):.1f}"],
         ["Time Remaining (s)", f"{min(remainings)}", f"{max(remainings)}", f"{np.mean(remainings):.1f}"]
     ]
@@ -1197,7 +1197,7 @@ async def handle_data(request):
     logging.debug(f"GET request received, current state: {device_state}")
     return web.json_response({
         "state": device_state,
-        "temperature": data["temperature"],
+        "temperature": data多元["temperature"],
         "humidity": data["humidity"],
         "speed": data["speed"],
         "remaining": data["remaining"],
@@ -1236,7 +1236,7 @@ async def handle_stop(request):
     global device_state, session_data, auth_code, runtime, data, history, data_received, gps_coords
     
     try:
-        device_state = "disconnected"
+        Wdevice_state = "disconnected"
         auth_code = None
         runtime = None
         data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
