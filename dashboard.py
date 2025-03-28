@@ -548,6 +548,7 @@ HTML_CONTENT = '''
         }
 
         function updateCharts(data) {
+            console.log("Updating charts with data:", data.history);
             const maxPoints = 20;
             const timestamps = data.history.timestamps.slice(-maxPoints);
             
@@ -610,21 +611,19 @@ HTML_CONTENT = '''
                 const position = { lat: latitude, lng: longitude };
                 
                 if (!marker) {
-                    marker = new google.maps.Marker({
+                    marker = new google.maps.marker.AdvancedMarkerElement({
                         position: position,
                         map: map,
-                        icon: {
-                            path: google.maps.SymbolPath.CIRCLE,
-                            scale: 10,
-                            fillColor: '#f59e0b',
-                            fillOpacity: 0.8,
-                            strokeWeight: 2,
-                            strokeColor: '#136aec'
-                        },
-                        title: "Arduino Device Location"
+                        title: "Arduino Device Location",
+                        content: new google.maps.marker.PinElement({
+                            background: '#f59e0b',
+                            borderColor: '#136aec',
+                            glyphColor: 'transparent',
+                            scale: 1.5
+                        }).element
                     });
                 } else {
-                    marker.setPosition(position);
+                    marker.position = position;
                 }
 
                 map.setCenter(position);
@@ -634,15 +633,16 @@ HTML_CONTENT = '''
 
         function updateSystemStatus(status, isActive = false) {
             const statusElement = document.getElementById('systemStatus');
-            statusElement.innerHTML = isActive ? 
-                '<i class="ri-checkbox-circle-line"></i> ' + status : 
-                '<i class="ri-focus-3-line"></i> ' + status;
-            statusElement.className = isActive ? 'status-badge active' : 'status-badge';
+            if (statusElement) {
+                statusElement.innerHTML = isActive ? 
+                    '<i class="ri-checkbox-circle-line"></i> ' + status : 
+                    '<i class="ri-focus-3-line"></i> ' + status;
+                statusElement.className = isActive ? 'status-badge active' : 'status-badge';
+            }
         }
 
         document.addEventListener('DOMContentLoaded', function() {
             initCharts();
-            // initMap() is now called via callback in the script tag
             document.getElementById('submitSetup').addEventListener('click', submitSetup);
             document.getElementById('stopButton').addEventListener('click', stopSystem);
             document.getElementById('downloadPdf').addEventListener('click', downloadPdf);
@@ -749,18 +749,24 @@ HTML_CONTENT = '''
                 updateSystemStatus(currentState.charAt(0).toUpperCase() + currentState.slice(1), currentState === 'running');
                 
                 if (data.data_received) {
-                    document.getElementById('temperature').innerHTML = `${data.temperature.toFixed(1)}<span class="metric-unit">°C</span>`;
-                    document.getElementById('humidity').innerHTML = `${data.humidity.toFixed(1)}<span class="metric-unit">%</span>`;
-                    document.getElementById('speed').innerHTML = `${data.speed}<span class="metric-unit">%</span>`;
-                    document.getElementById('remaining').innerHTML = `${data.remaining}<span class="metric-unit">s</span>`;
+                    const tempElement = document.getElementById('temperature');
+                    const humidElement = document.getElementById('humidity');
+                    const speedElement = document.getElementById('speed');
+                    const remainElement = document.getElementById('remaining');
+                    if (tempElement) tempElement.innerHTML = `${data.temperature.toFixed(1)}<span class="metric-unit">°C</span>`;
+                    if (humidElement) humidElement.innerHTML = `${data.humidity.toFixed(1)}<span class="metric-unit">%</span>`;
+                    if (speedElement) speedElement.innerHTML = `${data.speed}<span class="metric-unit">%</span>`;
+                    if (remainElement) remainElement.innerHTML = `${data.remaining}<span class="metric-unit">s</span>`;
+                    
                     const vpnStatus = document.getElementById('vpnStatus');
                     const vpnDetails = document.getElementById('vpnDetails');
-                    if (data.vpn_info) {
+                    if (data.vpn_info && vpnStatus && vpnDetails) {
                         vpnStatus.innerHTML = data.vpn_info.is_vpn ? 
                             `<span style="color: #f72585">Active (${data.vpn_info.confidence}%)</span>` : 
                             `<span style="color: #4ade80">Inactive (${data.vpn_info.confidence}%)</span>`;
                         vpnDetails.textContent = data.vpn_info.details;
                     }
+                    
                     updateCharts(data);
 
                     if (data.gps?.latitude && data.gps?.longitude) {
@@ -770,18 +776,25 @@ HTML_CONTENT = '''
                 }
 
                 if (currentState === 'disconnected') {
-                    document.getElementById('temperature').innerHTML = `0<span class="metric-unit">°C</span>`;
-                    document.getElementById('humidity').innerHTML = `0<span class="metric-unit">%</span>`;
-                    document.getElementById('speed').innerHTML = `0<span class="metric-unit">%</span>`;
-                    document.getElementById('remaining').innerHTML = `0<span class="metric-unit">s</span>`;
+                    const tempElement = document.getElementById('temperature');
+                    const humidElement = document.getElementById('humidity');
+                    const speedElement = document.getElementById('speed');
+                    const remainElement = document.getElementById('remaining');
+                    if (tempElement) tempElement.innerHTML = `0<span class="metric-unit">°C</span>`;
+                    if (humidElement) humidElement.innerHTML = `0<span class="metric-unit">%</span>`;
+                    if (speedElement) speedElement.innerHTML = `0<span class="metric-unit">%</span>`;
+                    if (remainElement) remainElement.innerHTML = `0<span class="metric-unit">s</span>`;
                     resetCharts();
                 }
 
-                document.getElementById('stopButton').style.display = 
+                const stopButton = document.getElementById('stopButton');
+                const downloadButton = document.getElementById('downloadPdf');
+                const newSessionButton = document.getElementById('startNewSession');
+                if (stopButton) stopButton.style.display = 
                     (currentState === 'running' || currentState === 'waiting' || currentState === 'ready') ? 'block' : 'none';
-                document.getElementById('downloadPdf').style.display = 
+                if (downloadButton) downloadButton.style.display = 
                     (currentState === 'stopped' && data.history.timestamps.length > 0) ? 'block' : 'none';
-                document.getElementById('startNewSession').style.display = 
+                if (newSessionButton) newSessionButton.style.display = 
                     (currentState === 'stopped' && data.history.timestamps.length > 0) ? 'block' : 'none';
 
                 previousState = currentState;
@@ -1062,7 +1075,8 @@ async def handle_data(request):
                     history["timestamps"].append(timestamp)
                     history["timestamps"] = history["timestamps"][-MAX_HISTORY:]
                     
-                    logging.info(f"Stored session data from {client_ip}: {session_record}")
+                    logging.debug(f"Updated history: {history}")  # Added for debugging
+                    
                     return web.json_response(
                         {
                             "status": "success", 
