@@ -18,7 +18,7 @@ MAX_HISTORY = 20
 VALID_DEVICE_STATES = ["disconnected", "ready", "waiting", "running", "stopped"]
 VALID_AUTH_CODE_MIN = 100
 VALID_AUTH_CODE_MAX = 999
-GOOGLE_API_KEY = "AIzaSyDpCPfntL6CEXPoOVPf2RmfmCjfV7rfano"  # Replace with your Google API key
+GOOGLE_API_KEY = "AIzaSyDpCPfntL6CEXPoOVPf2RmfmCjfV7rfano"  # Replace with your Google API key (for Geolocation and Maps JavaScript API)
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -38,6 +38,7 @@ async def get_gps_from_ip(ip_address):
         async with session.post(url, json=payload) as response:
             if response.status == 200:
                 data = await response.json()
+                logging.info(f"Google API response: {data}")
                 return {
                     "latitude": data["location"]["lat"],
                     "longitude": data["location"]["lng"]
@@ -165,7 +166,7 @@ def generate_pdf(session_data):
     logging.info(f"PDF generated: {filename}")
     return filename
 
-HTML_CONTENT = '''
+HTML_CONTENT = f'''
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -176,10 +177,9 @@ HTML_CONTENT = '''
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://maps.googleapis.com/maps/api/js?key={GOOGLE_API_KEY}&callback=initMap" async defer></script>
     <style>
-        :root {
+        :root {{
             --primary: #4361ee;
             --secondary: #3a0ca3;
             --accent: #4cc9f0;
@@ -190,20 +190,20 @@ HTML_CONTENT = '''
             --text: #f9fafb;
             --text-secondary: #9ca3af;
             --border: #374151;
-        }
-        body {
+        }}
+        body {{
             background: var(--background);
             color: var(--text);
             font-family: 'Roboto', sans-serif;
             margin: 0;
             padding: 30px;
             line-height: 1.6;
-        }
-        .container { 
+        }}
+        .container {{ 
             max-width: 1300px; 
             padding: 20px; 
-        }
-        .dashboard {
+        }}
+        .dashboard {{
             border-radius: 16px;
             padding: 24px;
             background: linear-gradient(135deg, 
@@ -214,31 +214,31 @@ HTML_CONTENT = '''
                 0 15px 35px rgba(0, 0, 0, 0.3), 
                 0 5px 15px rgba(0, 0, 0, 0.2);
             transition: all 0.3s ease;
-        }
-        .header {
+        }}
+        .header {{
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 24px;
             padding-bottom: 16px;
             border-bottom: 1px solid var(--border);
-        }
-        .header h1 {
+        }}
+        .header h1 {{
             font-size: 24px;
             font-weight: 600;
             margin: 0;
             display: flex;
             align-items: center;
             gap: 12px;
-        }
-        .header h1 i { 
+        }}
+        .header h1 i {{ 
             color: var(--accent); 
             transition: transform 0.3s ease;
-        }
-        .header h1 i:hover {
+        }}
+        .header h1 i:hover {{
             transform: rotate(15deg) scale(1.1);
-        }
-        .status-badge {
+        }}
+        .status-badge {{
             background: rgba(67, 97, 238, 0.15);
             color: var(--accent);
             padding: 6px 12px;
@@ -248,16 +248,16 @@ HTML_CONTENT = '''
             align-items: center;
             gap: 6px;
             transition: all 0.3s ease;
-        }
-        .status-badge:hover {
+        }}
+        .status-badge:hover {{
             transform: scale(1.05);
             background: rgba(67, 97, 238, 0.25);
-        }
-        .status-badge.active {
+        }}
+        .status-badge.active {{
             background: rgba(74, 222, 128, 0.15);
             color: var(--success);
-        }
-        .metric-card {
+        }}
+        .metric-card {{
             background: var(--card-bg);
             border-radius: 12px;
             padding: 20px;
@@ -268,8 +268,8 @@ HTML_CONTENT = '''
                 box-shadow 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
             position: relative;
             overflow: hidden;
-        }
-        .metric-card::before {
+        }}
+        .metric-card::before {{
             content: '';
             position: absolute;
             top: -50%;
@@ -285,17 +285,17 @@ HTML_CONTENT = '''
             transform: rotate(-45deg);
             opacity: 0;
             transition: opacity 0.3s ease;
-        }
-        .metric-card:hover::before {
+        }}
+        .metric-card:hover::before {{
             opacity: 1;
-        }
-        .metric-card:hover {
+        }}
+        .metric-card:hover {{
             transform: translateY(-8px) scale(1.02);
             box-shadow: 
                 0 15px 30px rgba(0, 0, 0, 0.3), 
                 0 0 20px rgba(67, 97, 238, 0.2);
-        }
-        .metric-title {
+        }}
+        .metric-title {{
             font-size: 13px;
             color: var(--text-secondary);
             margin-bottom: 12px;
@@ -305,19 +305,19 @@ HTML_CONTENT = '''
             font-weight: 500;
             letter-spacing: 0.5px;
             text-transform: uppercase;
-        }
-        .metric-value {
+        }}
+        .metric-value {{
             font-size: 28px;
             font-weight: 700;
             margin-bottom: 4px;
             letter-spacing: -1px;
-        }
-        .metric-unit {
+        }}
+        .metric-unit {{
             font-size: 16px;
             color: var(--text-secondary);
             margin-left: 5px;
-        }
-        .chart-container {
+        }}
+        .chart-container {{
             position: relative;
             height: 220px;
             margin-bottom: 24px;
@@ -329,27 +329,27 @@ HTML_CONTENT = '''
             transition: 
                 transform 0.4s cubic-bezier(0.25, 0.1, 0.25, 1),
                 box-shadow 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
-        }
-        .chart-container:hover {
+        }}
+        .chart-container:hover {{
             transform: translateY(-8px) scale(1.02);
             box-shadow: 
                 0 15px 30px rgba(0, 0, 0, 0.3), 
                 0 0 20px rgba(67, 97, 238, 0.2);
-        }
-        .control-card {
+        }}
+        .control-card {{
             background: var(--card-bg);
             border-radius: 12px;
             padding: 20px;
             margin-bottom: 24px;
             border: 1px solid var(--border);
             transition: all 0.3s ease;
-        }
-        .control-card:hover {
+        }}
+        .control-card:hover {{
             transform: translateY(-5px);
             box-shadow: 
                 0 10px 20px rgba(0, 0, 0, 0.2);
-        }
-        .btn-primary { 
+        }}
+        .btn-primary {{ 
             background-color: var(--primary); 
             border-color: var(--primary); 
             border-radius: 25px;
@@ -361,14 +361,14 @@ HTML_CONTENT = '''
                 background-color 0.3s ease,
                 transform 0.3s ease,
                 box-shadow 0.3s ease;
-        }
-        .btn-primary:hover {
+        }}
+        .btn-primary:hover {{
             background-color: var(--secondary);
             border-color: var(--secondary);
             transform: translateY(-3px);
             box-shadow: 0 7px 14px rgba(0, 0, 0, 0.25);
-        }
-        .btn-danger { 
+        }}
+        .btn-danger {{ 
             background-color: var(--warning); 
             border-color: var(--warning); 
             border-radius: 25px;
@@ -380,14 +380,14 @@ HTML_CONTENT = '''
                 background-color 0.3s ease,
                 transform 0.3s ease,
                 box-shadow 0.3s ease;
-        }
-        .btn-danger:hover {
+        }}
+        .btn-danger:hover {{
             background-color: #d3165e;
             border-color: #d3165e;
             transform: translateY(-3px);
             box-shadow: 0 7px 14px rgba(0, 0, 0, 0.25);
-        }
-        .btn-success { 
+        }}
+        .btn-success {{ 
             background-color: var(--success); 
             border-color: var(--success); 
             border-radius: 25px;
@@ -399,20 +399,20 @@ HTML_CONTENT = '''
                 background-color 0.3s ease,
                 transform 0.3s ease,
                 box-shadow 0.3s ease;
-        }
-        .btn-success:hover {
+        }}
+        .btn-success:hover {{
             background-color: #38b260;
             border-color: #38b260;
             transform: translateY(-3px);
             box-shadow: 0 7px 14px rgba(0, 0, 0, 0.25);
-        }
-        .form-control {
+        }}
+        .form-control {{
             background-color: var(--background);
             color: var(--text);
             border-color: var(--border);
             transition: all 0.3s ease;
-        }
-        .form-control:focus {
+        }}
+        .form-control:focus {{
             background-color: var(--background);
             color: var(--text);
             border-color: var(--primary);
@@ -420,13 +420,13 @@ HTML_CONTENT = '''
             box-shadow: 
                 0 0 0 3px rgba(67, 97, 238, 0.3),
                 0 0 0 1px rgba(67, 97, 238, 0.8);
-        }
-        #map { height: 100%; width: 100%; }
-        @media (max-width: 768px) {
-            .metric-card, .chart-container {
+        }}
+        #map {{ height: 100%; width: 100%; }}
+        @media (max-width: 768px) {{
+            .metric-card, .chart-container {{
                 margin-bottom: 15px;
-            }
-        }
+            }}
+        }}
     </style>
 </head>
 <body>
@@ -503,49 +503,49 @@ HTML_CONTENT = '''
         let map, marker;
         let previousState = "disconnected";
 
-        function initCharts() {
-            const commonOptions = {
+        function initCharts() {{
+            const commonOptions = {{
                 responsive: true,
                 maintainAspectRatio: false,
-                scales: { 
-                    x: { 
+                scales: {{ 
+                    x: {{ 
                         display: true, 
-                        ticks: { 
+                        ticks: {{ 
                             maxRotation: 45, 
                             minRotation: 45,
                             color: '#9ca3af'
-                        },
-                        grid: {
+                        }},
+                        grid: {{
                             color: 'rgba(156, 163, 175, 0.1)'
-                        }
-                    }, 
-                    y: { 
+                        }}
+                    }}, 
+                    y: {{ 
                         beginAtZero: false,
-                        ticks: {
+                        ticks: {{
                             color: '#9ca3af'
-                        },
-                        grid: {
+                        }},
+                        grid: {{
                             color: 'rgba(156, 163, 175, 0.1)'
-                        }
-                    } 
-                },
-                plugins: { 
-                    legend: { display: false },
-                    tooltip: {
+                        }}
+                    }} 
+                }},
+                plugins: {{ 
+                    legend: {{ display: false }},
+                    tooltip: {{
                         backgroundColor: '#1f2937',
                         titleColor: '#f9fafb',
                         bodyColor: '#f9fafb',
                         borderColor: '#4cc9f0',
                         borderWidth: 1
-                    }
-                }
-            };
+                    }}
+                }}
+            }};
             
-            tempChart = new Chart(document.getElementById('tempChart').getContext('2d'), {
+            tempChart = new Chart(document.getElementById('tempChart').getContext('2d'), {{
                 type: 'line',
-                data: { 
+                data: {{ 
                     labels: [], 
-                    datasets: [{ 
+                    datasets: [{{ 
                         data: [], 
                         borderColor: '#f72585', 
                         borderWidth: 2,
@@ -554,16 +554,16 @@ HTML_CONTENT = '''
                         pointHoverRadius: 5,
                         tension: 0.1,
                         fill: false 
-                    }] 
-                },
+                    }}] 
+                }},
                 options: commonOptions
-            });
+            }});
             
-            humidChart = new Chart(document.getElementById('humidChart').getContext('2d'), {
+            humidChart = new Chart(document.getElementById('humidChart').getContext('2d'), {{
                 type: 'line',
-                data: { 
+                data: {{ 
                     labels: [], 
-                    datasets: [{ 
+                    datasets: [{{ 
                         data: [], 
                         borderColor: '#4cc9f0', 
                         borderWidth: 2,
@@ -572,16 +572,16 @@ HTML_CONTENT = '''
                         pointHoverRadius: 5,
                         tension: 0.1,
                         fill: false 
-                    }] 
-                },
+                    }}] 
+                }},
                 options: commonOptions
-            });
+            }});
             
-            speedChart = new Chart(document.getElementById('speedChart').getContext('2d'), {
+            speedChart = new Chart(document.getElementById('speedChart').getContext('2d'), {{
                 type: 'line',
-                data: { 
+                data: {{ 
                     labels: [], 
-                    datasets: [{ 
+                    datasets: [{{ 
                         data: [], 
                         borderColor: '#4361ee', 
                         borderWidth: 2,
@@ -590,16 +590,16 @@ HTML_CONTENT = '''
                         pointHoverRadius: 5,
                         tension: 0.1,
                         fill: false 
-                    }] 
-                },
+                    }}] 
+                }},
                 options: commonOptions
-            });
+            }});
             
-            remainingChart = new Chart(document.getElementById('remainingChart').getContext('2d'), {
+            remainingChart = new Chart(document.getElementById('remainingChart').getContext('2d'), {{
                 type: 'line',
-                data: { 
+                data: {{ 
                     labels: [], 
-                    datasets: [{ 
+                    datasets: [{{ 
                         data: [], 
                         borderColor: '#9b59b6', 
                         borderWidth: 2,
@@ -608,13 +608,13 @@ HTML_CONTENT = '''
                         pointHoverRadius: 5,
                         tension: 0.1,
                         fill: false 
-                    }] 
-                },
+                    }}] 
+                }},
                 options: commonOptions
-            });
-        }
+            }});
+        }}
 
-        function updateCharts(data) {
+        function updateCharts(data) {{
             const maxPoints = 20;
             const timestamps = data.history.timestamps.slice(-maxPoints);
             
@@ -633,9 +633,9 @@ HTML_CONTENT = '''
             remainingChart.data.labels = timestamps;
             remainingChart.data.datasets[0].data = data.history.remaining.slice(-maxPoints);
             remainingChart.update();
-        }
+        }}
 
-        function resetCharts() {
+        function resetCharts() {{
             tempChart.data.labels = [];
             tempChart.data.datasets[0].data = [];
             tempChart.update();
@@ -651,33 +651,40 @@ HTML_CONTENT = '''
             remainingChart.data.labels = [];
             remainingChart.data.datasets[0].data = [];
             remainingChart.update();
-        }
+        }}
 
-        function initMap() {
-            map = L.map('map').setView([0, 0], 2);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            }).addTo(map);
-        }
+        function initMap() {{
+            map = new google.maps.Map(document.getElementById('map'), {{
+                center: {{ lat: 0, lng: 0 }},
+                zoom: 2
+            }});
+        }}
 
-        function updateMap(latitude, longitude) {
-            if (!marker) {
-                marker = L.marker([latitude, longitude]).addTo(map);
-            } else {
-                marker.setLatLng([latitude, longitude]);
-            }
-            map.setView([latitude, longitude], 13);
-        }
+        function updateMap(latitude, longitude) {{
+            console.log(`Updating Google Map to: Lat ${latitude}, Lon ${longitude}`);
+            const position = {{ lat: parseFloat(latitude), lng: parseFloat(longitude) }};
+            if (!marker) {{
+                marker = new google.maps.Marker({{
+                    position: position,
+                    map: map,
+                    title: "Device Location"
+                }});
+            }} else {{
+                marker.setPosition(position);
+            }}
+            map.setCenter(position);
+            map.setZoom(13);
+        }}
 
-        function updateSystemStatus(status, isActive = false) {
+        function updateSystemStatus(status, isActive = false) {{
             const statusElement = document.getElementById('systemStatus');
             statusElement.innerHTML = isActive ? 
                 '<i class="ri-checkbox-circle-line"></i> ' + status : 
                 '<i class="ri-focus-3-line"></i> ' + status;
             statusElement.className = isActive ? 'status-badge active' : 'status-badge';
-        }
+        }}
 
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function() {{
             initCharts();
             initMap();
             document.getElementById('submitSetup').addEventListener('click', submitSetup);
@@ -685,124 +692,124 @@ HTML_CONTENT = '''
             document.getElementById('downloadPdf').addEventListener('click', downloadPdf);
             document.getElementById('startNewSession').addEventListener('click', startNewSession);
             setInterval(fetchData, 1000);
-        });
+        }});
 
-        async function submitSetup() {
+        async function submitSetup() {{
             const authCode = parseInt(document.getElementById('authCode').value);
             const runtime = parseInt(document.getElementById('runtime').value);
             
-            if (isNaN(authCode) || authCode < 100 || authCode > 999) {
+            if (isNaN(authCode) || authCode < 100 || authCode > 999) {{
                 alert("Auth code must be between 100 and 999.");
                 return;
-            }
+            }}
             
-            if (isNaN(runtime) || runtime < 1) {
+            if (isNaN(runtime) || runtime < 1) {{
                 alert("Runtime must be a positive number.");
                 return;
-            }
+            }}
             
-            try {
-                const response = await fetch('/setup', {
+            try {{
+                const response = await fetch('/setup', {{
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ authCode: authCode, runtime: runtime })
-                });
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ authCode: authCode, runtime: runtime }})
+                }});
                 
                 const result = await response.json();
                 
-                if (result.status === 'waiting') {
+                if (result.status === 'waiting') {{
                     updateSystemStatus('Waiting');
                     document.getElementById('submitSetup').disabled = true;
                     fetchData();
-                } else {
+                }} else {{
                     alert("Setup failed: " + result.error);
-                }
-            } catch (error) {
+                }}
+            }} catch (error) {{
                 console.error('Error submitting setup:', error);
                 alert('Failed to submit setup.');
-            }
-        }
+            }}
+        }}
 
-        async function stopSystem() {
-            try {
-                const response = await fetch('/stop', {
+        async function stopSystem() {{
+            try {{
+                const response = await fetch('/stop', {{
                     method: 'POST'
-                });
-                if (response.ok) {
+                }});
+                if (response.ok) {{
                     window.location.reload();
-                }
-            } catch (error) {
+                }}
+            }} catch (error) {{
                 console.error('Error stopping system:', error);
                 alert('Failed to stop system.');
-            }
-        }
+            }}
+        }}
 
-        async function downloadPdf() {
-            try {
+        async function downloadPdf() {{
+            try {{
                 const response = await fetch('/download_pdf');
-                if (response.ok) {
+                if (response.ok) {{
                     const blob = await response.blob();
                     const url = window.URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `aerospin_report_${new Date().toISOString().replace(/[:.]/g, '-')}.pdf`;
+                    a.download = `aerospin_report_${{new Date().toISOString().replace(/[:.]/g, '-')}}.pdf`;
                     document.body.appendChild(a);
                     a.click();
                     a.remove();
                     window.URL.revokeObjectURL(url);
-                } else {
+                }} else {{
                     alert('No report available.');
-                }
-            } catch (error) {
+                }}
+            }} catch (error) {{
                 console.error('Error downloading PDF:', error);
                 alert('Failed to download report.');
-            }
-        }
+            }}
+        }}
 
-        async function startNewSession() {
-            try {
-                const response = await fetch('/reset', {
+        async function startNewSession() {{
+            try {{
+                const response = await fetch('/reset', {{
                     method: 'POST'
-                });
-                if (response.ok) {
+                }});
+                if (response.ok) {{
                     document.getElementById('submitSetup').disabled = false;
                     fetchData();
-                } else {
+                }} else {{
                     alert('Failed to start new session.');
-                }
-            } catch (error) {
+                }}
+            }} catch (error) {{
                 console.error('Error starting new session:', error);
                 alert('Failed to start new session.');
-            }
-        }
+            }}
+        }}
 
-        async function fetchData() {
-            try {
+        async function fetchData() {{
+            try {{
                 const response = await fetch('/data');
                 const data = await response.json();
                 const currentState = data.state;
 
                 updateSystemStatus(currentState.charAt(0).toUpperCase() + currentState.slice(1), currentState === 'running');
                 
-                if (data.data_received) {
-                    document.getElementById('temperature').innerHTML = `${data.temperature.toFixed(1)}<span class="metric-unit">°C</span>`;
-                    document.getElementById('humidity').innerHTML = `${data.humidity.toFixed(1)}<span class="metric-unit">%</span>`;
-                    document.getElementById('speed').innerHTML = `${data.speed}<span class="metric-unit">%</span>`;
-                    document.getElementById('remaining').innerHTML = `${data.remaining}<span class="metric-unit">s</span>`;
+                if (data.data_received) {{
+                    document.getElementById('temperature').innerHTML = `${{data.temperature.toFixed(1)}}<span class="metric-unit">°C</span>`;
+                    document.getElementById('humidity').innerHTML = `${{data.humidity.toFixed(1)}}<span class="metric-unit">%</span>`;
+                    document.getElementById('speed').innerHTML = `${{data.speed}}<span class="metric-unit">%</span>`;
+                    document.getElementById('remaining').innerHTML = `${{data.remaining}}<span class="metric-unit">s</span>`;
                     updateCharts(data);
 
-                    if (data.gps.latitude && data.gps.longitude) {
+                    if (data.gps.latitude && data.gps.longitude) {{
                         updateMap(data.gps.latitude, data.gps.longitude);
-                    }
-                }
+                    }}
+                }}
 
-                if (currentState === 'disconnected') {
+                if (currentState === 'disconnected') {{
                     document.getElementById('temperature').innerHTML = `0<span class="metric-unit">°C</span>`;
                     document.getElementById('humidity').innerHTML = `0<span class="metric-unit">%</span>`;
                     document.getElementById('speed').innerHTML = `0<span class="metric-unit">%</span>`;
                     document.getElementById('remaining').innerHTML = `0<span class="metric-unit">s</span>`;
                     resetCharts();
-                }
+                }}
 
                 document.getElementById('stopButton').style.display = 
                     (currentState === 'running' || currentState === 'waiting' || currentState === 'ready') ? 'block' : 'none';
@@ -813,11 +820,11 @@ HTML_CONTENT = '''
 
                 previousState = currentState;
 
-            } catch (error) {
+            }} catch (error) {{
                 console.error('Error fetching data:', error);
                 updateSystemStatus('Connection Error');
-            }
-        }
+            }}
+        }}
     </script>
 </body>
 </html>
