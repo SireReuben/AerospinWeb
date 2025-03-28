@@ -568,7 +568,6 @@ HTML_CONTENT = '''
         let tempChart, humidChart, speedChart, remainingChart;
         let map, marker;
         let userLocation = null;
-        let locationAttempted = false;
         let previousState = "disconnected";
 
         function initCharts() {
@@ -722,7 +721,7 @@ HTML_CONTENT = '''
         }
 
         function initMap() {
-            map = L.map('map').setView([20, 54], 2);  // Centered on Middle East
+            map = L.map('map').setView([20, 54], 2);  // Default view
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
                 maxZoom: 18
@@ -812,6 +811,37 @@ HTML_CONTENT = '''
             }
         }
 
+        function startLocationUpdates() {
+            setInterval(() => {
+                if (navigator.geolocation && previousState === 'running') {
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            userLocation = {
+                                latitude: position.coords.latitude,
+                                longitude: position.coords.longitude,
+                                accuracy: position.coords.accuracy,
+                                source: 'browser'
+                            };
+                            updateMap(userLocation.latitude, userLocation.longitude);
+                            updateLocationMarker(true);
+                            fetch('/data', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    status: 'data',
+                                    latitude: userLocation.latitude,
+                                    longitude: userLocation.longitude,
+                                    accuracy: userLocation.accuracy
+                                })
+                            });
+                        },
+                        (error) => console.warn("Geolocation error:", error),
+                        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                    );
+                }
+            }, 30000); // Update every 30 seconds during run
+        }
+
         function updateSystemStatus(status, isActive = false) {
             const statusElement = document.getElementById('systemStatus');
             statusElement.innerHTML = isActive ? 
@@ -823,6 +853,7 @@ HTML_CONTENT = '''
         document.addEventListener('DOMContentLoaded', function() {
             initCharts();
             initMap();
+            startLocationUpdates();
             document.getElementById('submitSetup').addEventListener('click', submitSetup);
             document.getElementById('stopButton').addEventListener('click', stopSystem);
             document.getElementById('downloadPdf').addEventListener('click', downloadPdf);
@@ -892,7 +923,7 @@ HTML_CONTENT = '''
                     document.body.appendChild(a);
                     a.click();
                     a.remove();
-                    window.URL.revokeObjectURL(url);
+                    window.URL.revokeObjectURL [=url);
                 } else {
                     alert('No report available.');
                 }
@@ -936,16 +967,17 @@ HTML_CONTENT = '''
                     updateCharts(data);
 
                     if (data.gps?.latitude && data.gps?.longitude) {
-                        if (!userLocation || data.gps.source === 'browser_geolocation') {
-                            userLocation = {
-                                latitude: data.gps.latitude,
-                                longitude: data.gps.longitude,
-                                accuracy: data.gps.accuracy || 50000,
-                                source: data.gps.source || 'ip'
-                            };
-                            updateMap(userLocation.latitude, userLocation.longitude);
-                            updateLocationMarker(data.gps.source === 'browser_geolocation');
-                        }
+                        console.log(`GPS data received: Lat ${data.gps.latitude}, Lon ${data.gps.longitude}`);
+                        userLocation = {
+                            latitude: data.gps.latitude,
+                            longitude: data.gps.longitude,
+                            accuracy: data.gps.accuracy || 50000,
+                            source: data.gps.source || 'ip'
+                        };
+                        updateMap(userLocation.latitude, userLocation.longitude);
+                        updateLocationMarker(data.gps.source === 'browser_geolocation');
+                    } else {
+                        console.log("No GPS data in this update");
                     }
                 }
 
@@ -1006,18 +1038,12 @@ async def handle_data(request):
                     }
                     logging.info(f"Received browser geolocation: {gps_coords}")
                 
-                # Fallback to IP geolocation if no client-side geolocation or if current location is inaccurate
-                elif "public_ip" in post_data and (
-                    gps_coords["latitude"] is None or 
-                    gps_coords.get("accuracy", float('inf')) > 50000
-                ):
-                    try:
-                        coords = await get_gps_from_ip(post_data["public_ip"])
-                        if coords["latitude"] is not None:
-                            gps_coords = coords
-                            logging.info(f"Updated location from IP: {gps_coords}")
-                    except Exception as e:
-                        logging.error(f"Error getting IP geolocation: {e}")
+                # Always attempt IP geolocation if public_ip is provided
+                elif "public_ip" in post_data:
+                    coords = await get_gps_from_ip(post_data["public_ip"])
+                    if coords["latitude"] is not None:
+                        gps_coords = coords
+                        logging.info(f"Updated location from IP: {gps_coords}")
 
                 # Validate and process sensor data
                 required_fields = ['temperature', 'humidity', 'speed', 'remaining']
