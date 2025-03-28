@@ -12,7 +12,6 @@ from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.lib.styles import getSampleStyleSheet
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-from ipaddress import ip_address
 
 PORT = int(os.environ.get("PORT", 10000))
 MAX_HISTORY = 20
@@ -40,31 +39,6 @@ auth_code = None
 runtime = None
 gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": None}
 
-def get_client_ip(request):
-    """Get client IP considering proxy headers"""
-    peername = request.transport.get_extra_info('peername')
-    if peername is not None:
-        host = peername[0]
-    
-    # Check for common proxy headers
-    forwarded_for = request.headers.get('X-Forwarded-For')
-    if forwarded_for:
-        ips = [ip.strip() for ip in forwarded_for.split(',')]
-        try:
-            # Get the first public IP in the chain
-            for ip in ips:
-                if not ip_address(ip).is_private:
-                    return ip
-            return ips[0]  # Fallback to first IP if all are private
-        except ValueError:
-            pass
-    
-    real_ip = request.headers.get('X-Real-IP')
-    if real_ip:
-        return real_ip
-    
-    return host
-
 async def get_gps_from_ip(ip_address):
     """Improved geolocation with multiple fallbacks"""
     logging.debug(f"Attempting IP geolocation for: {ip_address}")
@@ -88,23 +62,18 @@ async def get_gps_from_ip(ip_address):
                         }
         
         # Fallback to IP-API.com
-        ip_url = f"http://ip-api.com/json/{ip_address}?fields=status,message,lat,lon,isp,org,as,query"
+        ip_url = f"http://ip-api.com/json/{ip_address}?fields=status,message,lat,lon"
         async with ClientSession() as session:
             async with session.get(ip_url) as response:
                 if response.status == 200:
                     ip_data = await response.json()
                     if ip_data.get("status") == "success":
                         logging.info(f"IP-API success: {ip_data}")
-                        # Calculate approximate accuracy based on ISP data
-                        accuracy = 5000  # Base accuracy for city-level
-                        if 'isp' in ip_data and any(mobile in ip_data['isp'].lower() 
-                           for mobile in ['mobile', 'cellular', '3g', '4g', '5g']):
-                            accuracy = 1000  # Better accuracy for mobile networks
                         return {
                             "latitude": ip_data["lat"],
                             "longitude": ip_data["lon"],
                             "source": "ip_api",
-                            "accuracy": accuracy
+                            "accuracy": 50000  # IP-based is less accurate
                         }
     
     except Exception as e:
@@ -114,172 +83,128 @@ async def get_gps_from_ip(ip_address):
     return {"latitude": None, "longitude": None, "source": None, "accuracy": None}
 
 def generate_pdf(session_data):
-    """Generate a PDF report from session data with improved layout and error handling"""
     filename = f"aerospin_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
     doc = SimpleDocTemplate(filename, pagesize=letter)
     styles = getSampleStyleSheet()
     elements = []
 
-    try:
-        # Title and metadata
-        elements.append(Paragraph("Aerospin Session Report", styles['Title']))
-        elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
-        
-        # Location information if available
-        if gps_coords["latitude"] and gps_coords["longitude"]:
-            location_text = (
-                f"Location: Lat {gps_coords['latitude']:.6f}, Lon {gps_coords['longitude']:.6f} "
-                f"(Source: {gps_coords['source']}, Accuracy: {gps_coords['accuracy']}m)"
-            )
-            elements.append(Paragraph(location_text, styles['Normal']))
-        else:
-            elements.append(Paragraph("Location: Not available", styles['Normal']))
-        
-        elements.append(Spacer(1, 12))
+    elements.append(Paragraph("Aerospin Session Report", styles['Title']))
+    elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+    if gps_coords["latitude"] and gps_coords["longitude"]:
+        elements.append(Paragraph(
+            f"Location: Lat {gps_coords['latitude']:.6f}, Lon {gps_coords['longitude']:.6f} "
+            f"(Source: {gps_coords['source']}, Accuracy: {gps_coords['accuracy']}m)",
+            styles['Normal']
+        ))
+    elements.append(Spacer(1, 12))
 
-        if not session_data:
-            elements.append(Paragraph("No data collected during this session", styles['Normal']))
-            doc.build(elements)
-            return filename
-
-        # Extract data for charts and tables
-        timestamps = [entry["timestamp"] for entry in session_data]
-        temperatures = [entry["temperature"] for entry in session_data]
-        humidities = [entry["humidity"] for entry in session_data]
-        speeds = [entry["speed"] for entry in session_data]
-        remainings = [entry["remaining"] for entry in session_data]
-
-        # Summary Statistics Table
-        summary_data = [
-            ["Metric", "Minimum", "Maximum", "Average"],
-            ["Temperature (°C)", f"{min(temperatures):.1f}", f"{max(temperatures):.1f}", f"{np.mean(temperatures):.1f}"],
-            ["Humidity (%)", f"{min(humidities):.1f}", f"{max(humidities):.1f}", f"{np.mean(humidities):.1f}"],
-            ["Speed (%)", f"{min(speeds)}", f"{max(speeds)}", f"{np.mean(speeds):.1f}"],
-            ["Time Remaining (s)", f"{min(remainings)}", f"{max(remainings)}", f"{np.mean(remainings):.1f}"]
-        ]
-        
-        summary_table = Table(summary_data)
-        summary_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
-        ]))
-        
-        elements.append(Paragraph("Summary Statistics", styles['Heading2']))
-        elements.append(summary_table)
-        elements.append(Spacer(1, 12))
-
-        # Create charts
-        plt.figure(figsize=(10, 8))
-        
-        # Temperature Chart
-        plt.subplot(4, 1, 1)
-        plt.plot(timestamps, temperatures, label='Temperature', color='red')
-        plt.title('Temperature Variation')
-        plt.ylabel('°C')
-        plt.xticks(rotation=45)
-        plt.grid(True, linestyle='--', alpha=0.7)
-        plt.legend()
-
-        # Humidity Chart
-        plt.subplot(4, 1, 2)
-        plt.plot(timestamps, humidities, label='Humidity', color='blue')
-        plt.title('Humidity Variation')
-        plt.ylabel('%')
-        plt.xticks(rotation=45)
-        plt.grid(True, linestyle='--', alpha=0.7)
-        plt.legend()
-
-        # Speed Chart
-        plt.subplot(4, 1, 3)
-        plt.plot(timestamps, speeds, label='Speed', color='green')
-        plt.title('Speed Variation')
-        plt.ylabel('%')
-        plt.xticks(rotation=45)
-        plt.grid(True, linestyle='--', alpha=0.7)
-        plt.legend()
-
-        # Time Remaining Chart
-        plt.subplot(4, 1, 4)
-        plt.plot(timestamps, remainings, label='Time Remaining', color='purple')
-        plt.title('Time Remaining Variation')
-        plt.ylabel('Seconds')
-        plt.xlabel('Timestamp')
-        plt.xticks(rotation=45)
-        plt.grid(True, linestyle='--', alpha=0.7)
-        plt.legend()
-
-        plt.tight_layout()
-        
-        # Convert plot to image
-        img_buffer = io.BytesIO()
-        plt.savefig(img_buffer, format='png', dpi=100)
-        img_buffer.seek(0)
-        plt_img = Image(img_buffer, width=500, height=400)
-        plt.close()
-
-        elements.append(Paragraph("Graphical Analysis", styles['Heading2']))
-        elements.append(plt_img)
-        elements.append(Spacer(1, 12))
-
-        # Detailed Data Table
-        table_data = [
-            ["Timestamp", "Temp (°C)", "Humid (%)", "Speed (%)", "Remaining (s)", 
-             "Latitude", "Longitude", "Source"]
-        ]
-        
-        for entry in session_data:
-            table_data.append([
-                entry["timestamp"],
-                f"{entry['temperature']:.1f}",
-                f"{entry['humidity']:.1f}",
-                f"{entry['speed']}",
-                f"{entry['remaining']}",
-                f"{entry.get('latitude', 'N/A'):.6f}" if entry.get('latitude') else "N/A",
-                f"{entry.get('longitude', 'N/A'):.6f}" if entry.get('longitude') else "N/A",
-                entry.get('source', 'N/A')
-            ])
-
-        detailed_table = Table(table_data)
-        detailed_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('FONTSIZE', (0, 1), (-1, -1), 8)
-        ]))
-        
-        # Split long tables into multiple pages
-        detailed_table.hAlign = 'CENTER'
-        
-        elements.append(Paragraph("Detailed Session Data", styles['Heading2']))
-        elements.append(detailed_table)
-
-        # Build the PDF document
+    if not session_data:
+        elements.append(Paragraph("No data collected during this session", styles['Normal']))
         doc.build(elements)
-        logging.info(f"PDF report generated: {filename}")
         return filename
 
-    except Exception as e:
-        logging.error(f"Error generating PDF: {e}")
-        # Create error page if something went wrong
-        error_elements = [
-            Paragraph("Error Generating Report", styles['Title']),
-            Paragraph(f"An error occurred: {str(e)}", styles['Normal'])
-        ]
-        doc.build(error_elements)
-        return filename
+    timestamps = [entry["timestamp"] for entry in session_data]
+    temperatures = [entry["temperature"] for entry in session_data]
+    humidities = [entry["humidity"] for entry in session_data]
+    speeds = [entry["speed"] for entry in session_data]
+    remainings = [entry["remaining"] for entry in session_data]
 
-#
+    summary_data = [
+        ["Metric", "Minimum", "Maximum", "Average"],
+        ["Temperature (°C)", f"{min(temperatures):.1f}", f"{max(temperatures):.1f}", f"{np.mean(temperatures):.1f}"],
+        ["Humidity (%)", f"{min(humidities):.1f}", f"{max(humidities):.1f}", f"{np.mean(humidities):.1f}"],
+        ["Speed (%)", f"{min(speeds)}", f"{max(speeds)}", f"{np.mean(speeds):.1f}"],
+        ["Time Remaining (s)", f"{min(remainings)}", f"{max(remainings)}", f"{np.mean(remainings):.1f}"]
+    ]
+    
+    summary_table = Table(summary_data)
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    
+    elements.append(Paragraph("Summary Statistics", styles['Heading2']))
+    elements.append(summary_table)
+    elements.append(Spacer(1, 12))
+
+    plt.figure(figsize=(10, 8))
+    plt.subplot(4, 1, 1)
+    plt.plot(timestamps, temperatures, label='Temperature', color='red')
+    plt.title('Temperature Variation')
+    plt.ylabel('Temperature (°C)')
+    plt.xticks(rotation=45)
+    plt.legend()
+
+    plt.subplot(4, 1, 2)
+    plt.plot(timestamps, humidities, label='Humidity', color='blue')
+    plt.title('Humidity Variation')
+    plt.ylabel('Humidity (%)')
+    plt.xticks(rotation=45)
+    plt.legend()
+
+    plt.subplot(4, 1, 3)
+    plt.plot(timestamps, speeds, label='Speed', color='green')
+    plt.title('Speed Variation')
+    plt.ylabel('Speed (%)')
+    plt.xticks(rotation=45)
+    plt.legend()
+
+    plt.subplot(4, 1, 4)
+    plt.plot(timestamps, remainings, label='Time Remaining', color='purple')
+    plt.title('Time Remaining Variation')
+    plt.ylabel('Time (s)')
+    plt.xlabel('Timestamp')
+    plt.xticks(rotation=45)
+    plt.legend()
+
+    plt.tight_layout()
+    canvas = FigureCanvas(plt.gcf())
+    img_buffer = io.BytesIO()
+    canvas.print_png(img_buffer)
+    img_buffer.seek(0)
+    plt_img = Image(img_buffer)
+    plt_img.drawWidth = 500
+    plt_img.drawHeight = 400
+    elements.append(Paragraph("Graphical Analysis", styles['Heading2']))
+    elements.append(plt_img)
+    plt.close()
+
+    table_data = [["Timestamp", "Temperature (°C)", "Humidity (%)", "Speed (%)", "Time Remaining (s)", "Latitude", "Longitude"]]
+    for entry in session_data:
+        table_data.append([
+            entry["timestamp"],
+            f"{entry['temperature']:.1f}",
+            f"{entry['humidity']:.1f}",
+            f"{entry['speed']}",
+            f"{entry['remaining']}",
+            f"{entry.get('latitude', 'N/A'):.6f}" if entry.get('latitude') else "N/A",
+            f"{entry.get('longitude', 'N/A'):.6f}" if entry.get('longitude') else "N/A"
+        ])
+
+    table = Table(table_data)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 14),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
+    ]))
+    
+    elements.append(Paragraph("Detailed Session Data", styles['Heading2']))
+    elements.append(table)
+
+    doc.build(elements)
+    logging.info(f"PDF generated: {filename}")
+    return filename
+
 HTML_CONTENT = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -1127,7 +1052,6 @@ HTML_CONTENT = '''
 </html>
 '''
 
-
 async def handle_data(request):
     global data, history, device_state, data_received, session_data, gps_coords
     
@@ -1144,8 +1068,7 @@ async def handle_data(request):
         try:
             post_data = await request.json()
             status = post_data.get("status")
-            client_ip = get_client_ip(request)
-            logging.debug(f"Received POST data from {client_ip}: {post_data}")
+            logging.debug(f"Received POST data: {post_data}")
 
             if status == "arduino_ready":
                 if device_state == "disconnected":
@@ -1191,7 +1114,6 @@ async def handle_data(request):
                 )
             
             elif status == "data":
-                # Handle location data - prioritize browser geolocation first
                 if "latitude" in post_data and "longitude" in post_data:
                     gps_coords = {
                         "latitude": post_data["latitude"],
@@ -1200,26 +1122,19 @@ async def handle_data(request):
                         "accuracy": post_data.get("accuracy", 0)
                     }
                     logging.info(f"Received browser geolocation: {gps_coords}")
-                else:
-                    # Fall back to IP-based geolocation
-                    ip_to_use = post_data.get("public_ip", client_ip)
-                    if ip_to_use and ip_to_use != '127.0.0.1':
-                        try:
-                            coords = await get_gps_from_ip(ip_to_use)
-                            if coords["latitude"] is not None:
-                                gps_coords = coords
-                                logging.info(f"Updated location from IP {ip_to_use}: {gps_coords}")
-                        except Exception as e:
-                            logging.error(f"Failed to get location from IP {ip_to_use}: {e}")
+                
+                elif "public_ip" in post_data:
+                    coords = await get_gps_from_ip(post_data["public_ip"])
+                    if coords["latitude"] is not None:
+                        gps_coords = coords
+                        logging.info(f"Updated location from IP: {gps_coords}")
 
-                # Handle sensor data
                 required_fields = ['temperature', 'humidity', 'speed', 'remaining']
                 if all(field in post_data for field in required_fields):
-                    # Validate data types
-                    if (not isinstance(post_data["temperature"], (int, float)) or 
-                        not isinstance(post_data["humidity"], (int, float)) or 
-                        not isinstance(post_data["speed"], int) or 
-                        not isinstance(post_data["remaining"], int)):
+                    if not (isinstance(post_data["temperature"], (int, float)) and 
+                            isinstance(post_data["humidity"], (int, float)) and 
+                            isinstance(post_data["speed"], int) and 
+                            isinstance(post_data["remaining"], int)):
                         logging.warning("Invalid data types in POST data")
                         return web.json_response(
                             {"error": "Invalid data types"}, 
@@ -1229,12 +1144,10 @@ async def handle_data(request):
 
                     data_received = True
                     device_state = "running"
-                    logging.info(f"Arduino data received, state: {device_state}")
+                    logging.info(f"Arduino data received, state transitioned to: {device_state}")
                     
-                    # Update current data
                     data.update({field: post_data[field] for field in required_fields})
                     
-                    # Create session record
                     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
                     session_record = {
                         "timestamp": timestamp,
@@ -1243,14 +1156,13 @@ async def handle_data(request):
                     }
                     session_data.append(session_record)
                     
-                    # Update history (keeping only MAX_HISTORY entries)
                     for key in data:
                         history[key].append(data[key])
                         history[key] = history[key][-MAX_HISTORY:]
                     history["timestamps"].append(timestamp)
                     history["timestamps"] = history["timestamps"][-MAX_HISTORY:]
                     
-                    logging.debug(f"Stored session data: {session_record}")
+                    logging.info(f"Stored session data: {session_record}")
                     return web.json_response(
                         {
                             "status": "success", 
@@ -1260,7 +1172,7 @@ async def handle_data(request):
                         headers={"Access-Control-Allow-Origin": "*"}
                     )
                 
-                logging.warning("Missing required fields in POST data")
+                logging.warning("Missing fields in POST data")
                 return web.json_response(
                     {"error": "Missing required fields"}, 
                     status=400,
@@ -1282,7 +1194,6 @@ async def handle_data(request):
                 headers={"Access-Control-Allow-Origin": "*"}
             )
     
-    # Handle GET requests
     logging.debug(f"GET request received, current state: {device_state}")
     return web.json_response({
         "state": device_state,
@@ -1295,6 +1206,7 @@ async def handle_data(request):
         "gps": gps_coords
     },
     headers={"Access-Control-Allow-Origin": "*"})
+
 async def handle_setup(request):
     global auth_code, runtime, device_state
     
