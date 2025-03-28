@@ -12,32 +12,72 @@ from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.lib.styles import getSampleStyleSheet
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from cachetools import TTLCache
+import tempfile
+import shutil
 
-PORT = int(os.environ.get("PORT", 10000))
-MAX_HISTORY = 20
-VALID_DEVICE_STATES = ["disconnected", "ready", "waiting", "running", "stopped"]
-VALID_AUTH_CODE_MIN = 100
-VALID_AUTH_CODE_MAX = 999
-GOOGLE_API_KEY = "AIzaSyDpCPfntL6CEXPoOVPf2RmfmCjfV7rfano"  # Replace with your Google API key
+# Configuration
+class Config:
+    PORT = int(os.environ.get("PORT", 10000))
+    MAX_HISTORY = 20
+    VALID_DEVICE_STATES = ["disconnected", "ready", "waiting", "running", "stopped"]
+    VALID_AUTH_CODE_RANGE = (100, 999)
+    MIN_RUNTIME = 1
+    CACHE_SIZE = 100
+    CACHE_TTL = 300  # 5 minutes
+    ALLOWED_ORIGINS = "*"  # For development only - restrict in production
+    TEMP_DIR = "temp_reports"
+    GOOGLE_API_KEY = "AIzaSyDpCPfntL6CEXPoOVPf2RmfmCjfV7rfano"  # Replace with your own key in production
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("server.log")
-    ]
-)
+# Setup logging
+def setup_logging():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler("server.log")
+        ]
+    )
 
-data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
-history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
-data_received = False
-device_state = "disconnected"
-session_data = []
-auth_code = None
-runtime = None
-gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": None}
+# Application State
+class AppState:
+    def __init__(self):
+        self.data = {
+            "temperature": 0, 
+            "humidity": 0, 
+            "speed": 0, 
+            "remaining": 0
+        }
+        self.history = {
+            "temperature": [],
+            "humidity": [],
+            "speed": [],
+            "remaining": [],
+            "timestamps": []
+        }
+        self.data_received = False
+        self.device_state = "disconnected"
+        self.session_data = []
+        self.auth_code = None
+        self.runtime = None
+        self.gps_coords = {
+            "latitude": None,
+            "longitude": None,
+            "source": None,
+            "accuracy": None
+        }
+        self.vpn_cache = TTLCache(maxsize=Config.CACHE_SIZE, ttl=Config.CACHE_TTL)
+        self.vpn_info = {
+            "is_vpn": False,
+            "confidence": 0,
+            "details": "No data yet"
+        }
 
+# Initialize application state
+app_state = AppState()
+
+# HTML Content
 HTML_CONTENT = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -49,7 +89,7 @@ HTML_CONTENT = '''
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
-    <script src="https://maps.googleapis.com/maps/api/js?key=''' + GOOGLE_API_KEY + '''&libraries=places"></script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDpCPfntL6CEXPoOVPf2RmfmCjfV7rfano&libraries=places"></script>
     <style>
         :root {
             --primary: #4361ee;
@@ -299,6 +339,33 @@ HTML_CONTENT = '''
             border-radius: 12px;
             border: 1px solid var(--border);
         }
+        .vpn-tooltip {
+            position: relative;
+            display: inline-block;
+            cursor: help;
+        }
+        .vpn-tooltip .tooltip-text {
+            visibility: hidden;
+            width: 250px;
+            background-color: #1f2937;
+            color: #f9fafb;
+            text-align: center;
+            border-radius: 6px;
+            padding: 8px;
+            position: absolute;
+            z-index: 1;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -125px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            border: 1px solid #4cc9f0;
+            font-size: 12px;
+        }
+        .vpn-tooltip:hover .tooltip-text {
+            visibility: visible;
+            opacity: 1;
+        }
         @media (max-width: 768px) {
             .metric-card, .chart-container {
                 margin-bottom: 15px;
@@ -333,17 +400,25 @@ HTML_CONTENT = '''
                     </div>
                 </div>
                 <div class="col-md-3">
+                    <div class="metric-card vpn-status">
+                        <div class="metric-title"><i class="ri-shield-check-line"></i> VPN Status</div>
+                        <div id="vpnStatus" class="metric-value vpn-tooltip">
+                            Unknown
+                            <span class="tooltip-text" id="vpnDetails">No data yet</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-3">
                     <div class="metric-card remaining">
                         <div class="metric-title"><i class="ri-time-line"></i> Time Remaining</div>
                         <div id="remaining" class="metric-value">0<span class="metric-unit">s</span></div>
                     </div>
                 </div>
-            </div>
-            <div class="row">
                 <div class="col-md-3"><div class="chart-container"><canvas id="tempChart"></canvas></div></div>
                 <div class="col-md-3"><div class="chart-container"><canvas id="humidChart"></canvas></div></div>
                 <div class="col-md-3"><div class="chart-container"><canvas id="speedChart"></canvas></div></div>
-                <div class="col-md-3"><div class="chart-container"><canvas id="remainingChart"></canvas></div></div>
             </div>
             <div class="row">
                 <div class="col-md-4">
@@ -530,6 +605,18 @@ HTML_CONTENT = '''
             statusElement.className = isActive ? 'status-badge active' : 'status-badge';
         }
 
+        function updateVpnStatus(vpnInfo) {
+            const vpnStatus = document.getElementById('vpnStatus');
+            const vpnDetails = document.getElementById('vpnDetails');
+            
+            if (vpnInfo) {
+                vpnStatus.innerHTML = vpnInfo.is_vpn ? 
+                    `<span style="color: #f72585">Active (${vpnInfo.confidence}%)</span>` : 
+                    `<span style="color: #4ade80">Inactive (${vpnInfo.confidence}%)</span>`;
+                vpnDetails.textContent = vpnInfo.details;
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             initCharts();
             initMap();
@@ -643,6 +730,11 @@ HTML_CONTENT = '''
                     document.getElementById('humidity').innerHTML = `${data.humidity.toFixed(1)}<span class="metric-unit">%</span>`;
                     document.getElementById('speed').innerHTML = `${data.speed}<span class="metric-unit">%</span>`;
                     document.getElementById('remaining').innerHTML = `${data.remaining}<span class="metric-unit">s</span>`;
+                    
+                    if (data.vpn_info) {
+                        updateVpnStatus(data.vpn_info);
+                    }
+                    
                     updateCharts(data);
 
                     if (data.gps?.latitude && data.gps?.longitude) {
@@ -678,11 +770,85 @@ HTML_CONTENT = '''
 </html>
 '''
 
+async def check_vpn(ip_address):
+    """Enhanced VPN detection with caching"""
+    if ip_address in app_state.vpn_cache:
+        logging.debug(f"VPN status from cache for {ip_address}")
+        return app_state.vpn_cache[ip_address]
+    
+    vpn_indicators = []
+    confidence_score = 0
+    
+    try:
+        # API 1: ip-api.com
+        async with ClientSession() as session:
+            url = f"http://ip-api.com/json/{ip_address}?fields=status,message,proxy,hosting,org"
+            async with session.get(url, timeout=5) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get("status") == "success":
+                        if data.get("proxy", False):
+                            vpn_indicators.append("Proxy detected")
+                            confidence_score += 40
+                        if data.get("hosting", False):
+                            vpn_indicators.append("Hosting provider")
+                            confidence_score += 30
+                        org = data.get("org", "").lower()
+                        if any(keyword in org for keyword in ["vpn", "proxy", "cloud", "hosting"]):
+                            vpn_indicators.append(f"Org: {org}")
+                            confidence_score += 20
+
+        # API 2: ipinfo.io
+        async with ClientSession() as session:
+            url = f"https://ipinfo.io/{ip_address}/json"
+            async with session.get(url, timeout=5) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get("vpn", False):
+                        vpn_indicators.append("VPN flagged")
+                        confidence_score += 50
+                    if "org" in data and any(keyword in data["org"].lower() for keyword in ["vpn", "proxy"]):
+                        vpn_indicators.append(f"Org: {data['org']}")
+                        confidence_score += 20
+
+        # API 3: db-ip.com
+        async with ClientSession() as session:
+            url = f"https://api.db-ip.com/v2/free/{ip_address}"
+            async with session.get(url, timeout=5) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get("isDatacenter", False):
+                        vpn_indicators.append("Datacenter IP")
+                        confidence_score += 35
+                    if "isp" in data and any(keyword in data["isp"].lower() for keyword in ["vpn", "proxy", "cloud"]):
+                        vpn_indicators.append(f"ISP: {data['isp']}")
+                        confidence_score += 25
+
+        # Final assessment
+        is_vpn = confidence_score >= 50
+        details = "; ".join(vpn_indicators) if vpn_indicators else "No VPN indicators"
+        vpn_info = {
+            "is_vpn": is_vpn,
+            "confidence": min(confidence_score, 100),
+            "details": f"{details} (Note: Detection is approximate)"
+        }
+        
+        # Cache the result
+        app_state.vpn_cache[ip_address] = vpn_info
+        logging.info(f"VPN check for {ip_address}: {vpn_info}")
+        return vpn_info
+
+    except Exception as e:
+        logging.error(f"VPN check failed for {ip_address}: {e}")
+        vpn_info = {"is_vpn": False, "confidence": 0, "details": f"Check failed: {str(e)}"}
+        app_state.vpn_cache[ip_address] = vpn_info
+        return vpn_info
+
 async def get_gps_from_ip(ip_address):
     """IP-based geolocation for the Arduino device"""
     logging.debug(f"Attempting IP geolocation for: {ip_address}")
     try:
-        url = f"https://www.googleapis.com/geolocation/v1/geolocate?key={GOOGLE_API_KEY}"
+        url = f"https://www.googleapis.com/geolocation/v1/geolocate?key={Config.GOOGLE_API_KEY}"
         payload = {"considerIp": True}
         
         async with ClientSession() as session:
@@ -720,379 +886,498 @@ async def get_gps_from_ip(ip_address):
     return {"latitude": None, "longitude": None, "source": None, "accuracy": None}
 
 def generate_pdf(session_data):
-    filename = f"aerospin_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-    doc = SimpleDocTemplate(filename, pagesize=letter)
-    styles = getSampleStyleSheet()
-    elements = []
+    """Generate PDF report with proper cleanup of resources"""
+    # Create temp directory if it doesn't exist
+    os.makedirs(Config.TEMP_DIR, exist_ok=True)
+    
+    filename = os.path.join(
+        Config.TEMP_DIR,
+        f"aerospin_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    )
+    
+    try:
+        doc = SimpleDocTemplate(filename, pagesize=letter)
+        styles = getSampleStyleSheet()
+        elements = []
 
-    elements.append(Paragraph("Aerospin Session Report", styles['Title']))
-    elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
-    if gps_coords["latitude"] and gps_coords["longitude"]:
-        elements.append(Paragraph(
-            f"Device Location: Lat {gps_coords['latitude']:.6f}, Lon {gps_coords['longitude']:.6f} "
-            f"(Source: {gps_coords['source']}, Accuracy: {gps_coords['accuracy']}m)",
-            styles['Normal']
-        ))
-    elements.append(Spacer(1, 12))
+        # Add report header
+        elements.append(Paragraph("Aerospin Session Report", styles['Title']))
+        elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+        
+        if app_state.gps_coords["latitude"] and app_state.gps_coords["longitude"]:
+            elements.append(Paragraph(
+                f"Device Location: Lat {app_state.gps_coords['latitude']:.6f}, "
+                f"Lon {app_state.gps_coords['longitude']:.6f} "
+                f"(Source: {app_state.gps_coords['source']}, "
+                f"Accuracy: {app_state.gps_coords['accuracy']}m)",
+                styles['Normal']
+            ))
+        
+        elements.append(Spacer(1, 12))
 
-    if not session_data:
-        elements.append(Paragraph("No data collected during this session", styles['Normal']))
+        if not session_data:
+            elements.append(Paragraph("No data collected during this session", styles['Normal']))
+            doc.build(elements)
+            return filename
+
+        # Extract data for charts and tables
+        timestamps = [entry["timestamp"] for entry in session_data]
+        temperatures = [entry["temperature"] for entry in session_data]
+        humidities = [entry["humidity"] for entry in session_data]
+        speeds = [entry["speed"] for entry in session_data]
+        remainings = [entry["remaining"] for entry in session_data]
+
+        # Add summary table
+        summary_data = [
+            ["Metric", "Minimum", "Maximum", "Average"],
+            ["Temperature (°C)", f"{min(temperatures):.1f}", f"{max(temperatures):.1f}", f"{np.mean(temperatures):.1f}"],
+            ["Humidity (%)", f"{min(humidities):.1f}", f"{max(humidities):.1f}", f"{np.mean(humidities):.1f}"],
+            ["Speed (%)", f"{min(speeds)}", f"{max(speeds)}", f"{np.mean(speeds):.1f}"],
+            ["Time Remaining (s)", f"{min(remainings)}", f"{max(remainings)}", f"{np.mean(remainings):.1f}"]
+        ]
+        
+        summary_table = Table(summary_data)
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        
+        elements.append(Paragraph("Summary Statistics", styles['Heading2']))
+        elements.append(summary_table)
+        elements.append(Spacer(1, 12))
+
+        # Generate charts
+        plt.figure(figsize=(10, 8))
+        
+        # Temperature chart
+        plt.subplot(4, 1, 1)
+        plt.plot(timestamps, temperatures, label='Temperature', color='red')
+        plt.title('Temperature Variation')
+        plt.ylabel('Temperature (°C)')
+        plt.xticks(rotation=45)
+        plt.legend()
+
+        # Humidity chart
+        plt.subplot(4, 1, 2)
+        plt.plot(timestamps, humidities, label='Humidity', color='blue')
+        plt.title('Humidity Variation')
+        plt.ylabel('Humidity (%)')
+        plt.xticks(rotation=45)
+        plt.legend()
+
+        # Speed chart
+        plt.subplot(4, 1, 3)
+        plt.plot(timestamps, speeds, label='Speed', color='green')
+        plt.title('Speed Variation')
+        plt.ylabel('Speed (%)')
+        plt.xticks(rotation=45)
+        plt.legend()
+
+        # Time remaining chart
+        plt.subplot(4, 1, 4)
+        plt.plot(timestamps, remainings, label='Time Remaining', color='purple')
+        plt.title('Time Remaining Variation')
+        plt.ylabel('Time (s)')
+        plt.xlabel('Timestamp')
+        plt.xticks(rotation=45)
+        plt.legend()
+
+        plt.tight_layout()
+        
+        # Convert plot to image
+        img_buffer = io.BytesIO()
+        plt.savefig(img_buffer, format='png', dpi=300)
+        img_buffer.seek(0)
+        plt.close()
+        
+        # Add image to PDF
+        plt_img = Image(img_buffer)
+        plt_img.drawWidth = 500
+        plt_img.drawHeight = 400
+        elements.append(Paragraph("Graphical Analysis", styles['Heading2']))
+        elements.append(plt_img)
+
+        # Add detailed data table
+        table_data = [["Timestamp", "Temperature (°C)", "Humidity (%)", "Speed (%)", "Time Remaining (s)", "Latitude", "Longitude"]]
+        for entry in session_data:
+            table_data.append([
+                entry["timestamp"],
+                f"{entry['temperature']:.1f}",
+                f"{entry['humidity']:.1f}",
+                f"{entry['speed']}",
+                f"{entry['remaining']}",
+                f"{entry.get('latitude', 'N/A'):.6f}" if entry.get('latitude') else "N/A",
+                f"{entry.get('longitude', 'N/A'):.6f}" if entry.get('longitude') else "N/A"
+            ])
+
+        table = Table(table_data)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 14),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
+        ]))
+        
+        elements.append(Paragraph("Detailed Session Data", styles['Heading2']))
+        elements.append(table)
+
+        # Build the PDF
         doc.build(elements)
+        logging.info(f"PDF generated: {filename}")
         return filename
 
-    timestamps = [entry["timestamp"] for entry in session_data]
-    temperatures = [entry["temperature"] for entry in session_data]
-    humidities = [entry["humidity"] for entry in session_data]
-    speeds = [entry["speed"] for entry in session_data]
-    remainings = [entry["remaining"] for entry in session_data]
+    except Exception as e:
+        logging.error(f"Error generating PDF: {e}")
+        raise
 
-    summary_data = [
-        ["Metric", "Minimum", "Maximum", "Average"],
-        ["Temperature (°C)", f"{min(temperatures):.1f}", f"{max(temperatures):.1f}", f"{np.mean(temperatures):.1f}"],
-        ["Humidity (%)", f"{min(humidities):.1f}", f"{max(humidities):.1f}", f"{np.mean(humidities):.1f}"],
-        ["Speed (%)", f"{min(speeds)}", f"{max(speeds)}", f"{np.mean(speeds):.1f}"],
-        ["Time Remaining (s)", f"{min(remainings)}", f"{max(remainings)}", f"{np.mean(remainings):.1f}"]
-    ]
-    
-    summary_table = Table(summary_data)
-    summary_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black)
-    ]))
-    
-    elements.append(Paragraph("Summary Statistics", styles['Heading2']))
-    elements.append(summary_table)
-    elements.append(Spacer(1, 12))
-
-    plt.figure(figsize=(10, 8))
-    plt.subplot(4, 1, 1)
-    plt.plot(timestamps, temperatures, label='Temperature', color='red')
-    plt.title('Temperature Variation')
-    plt.ylabel('Temperature (°C)')
-    plt.xticks(rotation=45)
-    plt.legend()
-
-    plt.subplot(4, 1, 2)
-    plt.plot(timestamps, humidities, label='Humidity', color='blue')
-    plt.title('Humidity Variation')
-    plt.ylabel('Humidity (%)')
-    plt.xticks(rotation=45)
-    plt.legend()
-
-    plt.subplot(4, 1, 3)
-    plt.plot(timestamps, speeds, label='Speed', color='green')
-    plt.title('Speed Variation')
-    plt.ylabel('Speed (%)')
-    plt.xticks(rotation=45)
-    plt.legend()
-
-    plt.subplot(4, 1, 4)
-    plt.plot(timestamps, remainings, label='Time Remaining', color='purple')
-    plt.title('Time Remaining Variation')
-    plt.ylabel('Time (s)')
-    plt.xlabel('Timestamp')
-    plt.xticks(rotation=45)
-    plt.legend()
-
-    plt.tight_layout()
-    canvas = FigureCanvas(plt.gcf())
-    img_buffer = io.BytesIO()
-    canvas.print_png(img_buffer)
-    img_buffer.seek(0)
-    plt_img = Image(img_buffer)
-    plt_img.drawWidth = 500
-    plt_img.drawHeight = 400
-    elements.append(Paragraph("Graphical Analysis", styles['Heading2']))
-    elements.append(plt_img)
-    plt.close()
-
-    table_data = [["Timestamp", "Temperature (°C)", "Humidity (%)", "Speed (%)", "Time Remaining (s)", "Latitude", "Longitude"]]
-    for entry in session_data:
-        table_data.append([
-            entry["timestamp"],
-            f"{entry['temperature']:.1f}",
-            f"{entry['humidity']:.1f}",
-            f"{entry['speed']}",
-            f"{entry['remaining']}",
-            f"{entry.get('latitude', 'N/A'):.6f}" if entry.get('latitude') else "N/A",
-            f"{entry.get('longitude', 'N/A'):.6f}" if entry.get('longitude') else "N/A"
-        ])
-
-    table = Table(table_data)
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 14),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
-    ]))
-    
-    elements.append(Paragraph("Detailed Session Data", styles['Heading2']))
-    elements.append(table)
-
-    doc.build(elements)
-    logging.info(f"PDF generated: {filename}")
-    return filename
-
+# Request Handlers
 async def handle_data(request):
-    global data, history, device_state, data_received, session_data, gps_coords
-    
+    """Handle data requests with proper CORS and error handling"""
+    # Handle CORS preflight
     if request.method == "OPTIONS":
         return web.Response(
             headers={
-                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Origin": Config.ALLOWED_ORIGINS,
                 "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
                 "Access-Control-Allow-Headers": "Content-Type",
             }
         )
 
+    # Handle POST requests
     if request.method == "POST":
         try:
             post_data = await request.json()
             status = post_data.get("status")
             client_ip = post_data.get("public_ip", request.remote)
-            logging.debug(f"Received POST data from IP {client_ip}: {post_data}")
+            
+            # Sanitize client IP
+            if client_ip == "Unknown":
+                client_ip = request.remote
+                
+            logging.info(f"Received POST data from IP {client_ip}")
 
+            # Check VPN status
+            vpn_info = await check_vpn(client_ip)
+            app_state.vpn_info = vpn_info
+
+            # Handle different status cases
             if status == "arduino_ready":
-                if device_state == "disconnected":
-                    device_state = "ready"
-                    logging.info(f"Arduino detected at {client_ip}, state transitioned to: {device_state}")
+                if app_state.device_state == "disconnected":
+                    app_state.device_state = "ready"
+                    logging.info(f"Arduino ready at {client_ip}, state: {app_state.device_state}")
                 return web.json_response(
-                    {"status": "ready", "state": device_state},
-                    headers={"Access-Control-Allow-Origin": "*"}
+                    {"status": "ready", "state": app_state.device_state},
+                    headers={"Access-Control-Allow-Origin": Config.ALLOWED_ORIGINS}
                 )
             
             elif status == "check_auth":
-                if auth_code is not None and runtime is not None:
-                    logging.info(f"Sending auth_code: {auth_code}, runtime: {runtime} to {client_ip}")
+                if app_state.auth_code is not None and app_state.runtime is not None:
+                    logging.info(f"Sending auth code to {client_ip}")
                     return web.json_response({
                         "status": "auth_code",
-                        "code": auth_code,
-                        "runtime": runtime,
-                        "state": device_state
+                        "code": app_state.auth_code,
+                        "runtime": app_state.runtime,
+                        "state": app_state.device_state
                     },
-                    headers={"Access-Control-Allow-Origin": "*"})
-                logging.debug(f"No auth code yet for {client_ip}, state: {device_state}")
+                    headers={"Access-Control-Allow-Origin": Config.ALLOWED_ORIGINS})
+                
+                logging.debug(f"No auth code yet for {client_ip}")
                 return web.json_response(
-                    {"status": "waiting", "state": device_state},
-                    headers={"Access-Control-Allow-Origin": "*"}
+                    {"status": "waiting", "state": app_state.device_state},
+                    headers={"Access-Control-Allow-Origin": Config.ALLOWED_ORIGINS}
                 )
             
             elif status == "start":
-                device_state = "running"
-                logging.info(f"State transitioned to: {device_state} for {client_ip}")
+                app_state.device_state = "running"
+                logging.info(f"Device started at {client_ip}, state: {app_state.device_state}")
                 return web.json_response(
-                    {"status": "running", "state": device_state},
-                    headers={"Access-Control-Allow-Origin": "*"}
+                    {"status": "running", "state": app_state.device_state},
+                    headers={"Access-Control-Allow-Origin": Config.ALLOWED_ORIGINS}
                 )
             
             elif status == "stopped":
-                device_state = "stopped"
-                logging.info(f"State transitioned to: {device_state} for {client_ip}")
+                app_state.device_state = "stopped"
+                logging.info(f"Device stopped at {client_ip}, state: {app_state.device_state}")
                 return web.json_response(
-                    {"status": "stopped", "state": device_state},
-                    headers={"Access-Control-Allow-Origin": "*"}
+                    {"status": "stopped", "state": app_state.device_state},
+                    headers={"Access-Control-Allow-Origin": Config.ALLOWED_ORIGINS}
                 )
             
             elif status == "data":
-                if client_ip and client_ip != "Unknown":
+                # Update GPS coordinates if available
+                if client_ip:
                     coords = await get_gps_from_ip(client_ip)
                     if coords["latitude"] is not None:
-                        gps_coords = coords
-                        logging.info(f"Updated Arduino location from IP {client_ip}: {gps_coords}")
+                        app_state.gps_coords = coords
+                        logging.info(f"Updated device location from IP {client_ip}")
 
+                # Validate data
                 required_fields = ['temperature', 'humidity', 'speed', 'remaining']
-                if all(field in post_data for field in required_fields):
-                    if not (isinstance(post_data["temperature"], (int, float)) and 
-                            isinstance(post_data["humidity"], (int, float)) and 
-                            isinstance(post_data["speed"], int) and 
-                            isinstance(post_data["remaining"], int)):
-                        logging.warning(f"Invalid data types in POST data from {client_ip}")
-                        return web.json_response(
-                            {"error": "Invalid data types"}, 
-                            status=400,
-                            headers={"Access-Control-Allow-Origin": "*"}
-                        )
-
-                    data_received = True
-                    device_state = "running"
-                    logging.info(f"Arduino data received from {client_ip}, state transitioned to: {device_state}")
-                    
-                    data.update({field: post_data[field] for field in required_fields})
-                    
-                    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-                    session_record = {
-                        "timestamp": timestamp,
-                        **{k: post_data[k] for k in required_fields},
-                        **gps_coords
-                    }
-                    session_data.append(session_record)
-                    
-                    for key in data:
-                        history[key].append(data[key])
-                        history[key] = history[key][-MAX_HISTORY:]
-                    history["timestamps"].append(timestamp)
-                    history["timestamps"] = history["timestamps"][-MAX_HISTORY:]
-                    
-                    logging.info(f"Stored session data from {client_ip}: {session_record}")
+                if not all(field in post_data for field in required_fields):
+                    logging.warning(f"Missing fields in data from {client_ip}")
                     return web.json_response(
-                        {
-                            "status": "success", 
-                            "state": device_state,
-                            "gps": gps_coords
-                        },
-                        headers={"Access-Control-Allow-Origin": "*"}
+                        {"error": "Missing required fields"}, 
+                        status=400,
+                        headers={"Access-Control-Allow-Origin": Config.ALLOWED_ORIGINS}
                     )
                 
-                logging.warning(f"Missing fields in POST data from {client_ip}")
+                # Validate data types
+                if not (isinstance(post_data["temperature"], (int, float)) or \
+                   not isinstance(post_data["humidity"], (int, float)) or \
+                   not isinstance(post_data["speed"], int) or \
+                   not isinstance(post_data["remaining"], int):
+                    logging.warning(f"Invalid data types from {client_ip}")
+                    return web.json_response(
+                        {"error": "Invalid data types"}, 
+                        status=400,
+                        headers={"Access-Control-Allow-Origin": Config.ALLOWED_ORIGINS}
+                    )
+
+                # Update application state
+                app_state.data_received = True
+                app_state.device_state = "running"
+                
+                # Update current data
+                for field in required_fields:
+                    app_state.data[field] = post_data[field]
+                
+                # Create session record
+                timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+                session_record = {
+                    "timestamp": timestamp,
+                    **{k: post_data[k] for k in required_fields},
+                    **app_state.gps_coords
+                }
+                app_state.session_data.append(session_record)
+                
+                # Update history (with size limit)
+                for key in app_state.data:
+                    app_state.history[key].append(app_state.data[key])
+                    app_state.history[key] = app_state.history[key][-Config.MAX_HISTORY:]
+                
+                app_state.history["timestamps"].append(timestamp)
+                app_state.history["timestamps"] = app_state.history["timestamps"][-Config.MAX_HISTORY:]
+                
+                logging.info(f"Stored data from {client_ip}")
                 return web.json_response(
-                    {"error": "Missing required fields"}, 
-                    status=400,
-                    headers={"Access-Control-Allow-Origin": "*"}
+                    {
+                        "status": "success", 
+                        "state": app_state.device_state,
+                        "gps": app_state.gps_coords,
+                        "vpn_info": app_state.vpn_info
+                    },
+                    headers={"Access-Control-Allow-Origin": Config.ALLOWED_ORIGINS}
                 )
                 
         except json.JSONDecodeError:
-            logging.error(f"Invalid JSON received from {request.remote}")
+            logging.error(f"Invalid JSON from {request.remote}")
             return web.json_response(
                 {"error": "Invalid JSON"}, 
                 status=400,
-                headers={"Access-Control-Allow-Origin": "*"}
+                headers={"Access-Control-Allow-Origin": Config.ALLOWED_ORIGINS}
             )
         except Exception as e:
             logging.error(f"Error processing data from {request.remote}: {e}")
             return web.json_response(
                 {"error": "Internal server error"}, 
                 status=500,
-                headers={"Access-Control-Allow-Origin": "*"}
+                headers={"Access-Control-Allow-Origin": Config.ALLOWED_ORIGINS}
             )
     
-    logging.debug(f"GET request received from {request.remote}, current state: {device_state}")
+    # Handle GET requests
+    logging.debug(f"GET request from {request.remote}")
     return web.json_response({
-        "state": device_state,
-        "temperature": data["temperature"],
-        "humidity": data["humidity"],
-        "speed": data["speed"],
-        "remaining": data["remaining"],
-        "data_received": data_received,
-        "history": history,
-        "gps": gps_coords
+        "state": app_state.device_state,
+        "temperature": app_state.data["temperature"],
+        "humidity": app_state.data["humidity"],
+        "speed": app_state.data["speed"],
+        "remaining": app_state.data["remaining"],
+        "data_received": app_state.data_received,
+        "history": app_state.history,
+        "gps": app_state.gps_coords,
+        "vpn_info": app_state.vpn_info
     },
-    headers={"Access-Control-Allow-Origin": "*"})
+    headers={"Access-Control-Allow-Origin": Config.ALLOWED_ORIGINS})
 
 async def handle_setup(request):
-    global auth_code, runtime, device_state
-    
+    """Handle system setup with validation"""
     try:
         post_data = await request.json()
-        logging.debug(f"Received setup data: {post_data}")
-        
         auth_code = post_data.get("authCode")
         runtime = post_data.get("runtime")
         
-        if not (isinstance(auth_code, int) and VALID_AUTH_CODE_MIN <= auth_code <= VALID_AUTH_CODE_MAX) or not (isinstance(runtime, int) and runtime > 0):
-            logging.warning(f"Invalid setup data - authCode: {auth_code}, runtime: {runtime}")
-            return web.json_response({"error": f"Auth code must be between {VALID_AUTH_CODE_MIN} and {VALID_AUTH_CODE_MAX}"}, status=400)
+        # Validate auth code
+        if not (isinstance(auth_code, int) and 
+                Config.VALID_AUTH_CODE_RANGE[0] <= auth_code <= Config.VALID_AUTH_CODE_RANGE[1]):
+            logging.warning(f"Invalid auth code: {auth_code}")
+            return web.json_response(
+                {"error": f"Auth code must be between {Config.VALID_AUTH_CODE_RANGE[0]} and {Config.VALID_AUTH_CODE_RANGE[1]}"}, 
+                status=400
+            )
             
-        device_state = "waiting"
-        logging.info(f"Setup complete - Auth Code: {auth_code}, Runtime: {runtime}, State: {device_state}")
-        return web.json_response({"status": "waiting", "state": device_state})
+        # Validate runtime
+        if not (isinstance(runtime, int) and runtime >= Config.MIN_RUNTIME):
+            logging.warning(f"Invalid runtime: {runtime}")
+            return web.json_response(
+                {"error": f"Runtime must be at least {Config.MIN_RUNTIME} seconds"}, 
+                status=400
+            )
+            
+        # Update state
+        app_state.auth_code = auth_code
+        app_state.runtime = runtime
+        app_state.device_state = "waiting"
+        
+        logging.info(f"Setup complete - Auth Code: {auth_code}, Runtime: {runtime}")
+        return web.json_response({"status": "waiting", "state": app_state.device_state})
         
     except json.JSONDecodeError:
         logging.error("Invalid JSON in setup request")
         return web.json_response({"error": "Invalid JSON"}, status=400)
     except Exception as e:
-        logging.error(f"Error in setup: {e}")
+        logging.error(f"Setup error: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_stop(request):
-    global device_state, session_data, auth_code, runtime, data, history, data_received, gps_coords
-    
+    """Handle system stop and cleanup"""
     try:
-        device_state = "disconnected"
-        auth_code = None
-        runtime = None
-        data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
-        history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
-        data_received = False
-        gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": None}
-        logging.info(f"System stopped, state and metrics reset - State: {device_state}")
-        return web.json_response({"status": "stopped", "state": device_state})
+        app_state.device_state = "disconnected"
+        app_state.auth_code = None
+        app_state.runtime = None
+        app_state.data = {k: 0 for k in app_state.data}
+        app_state.history = {k: [] for k in app_state.history}
+        app_state.data_received = False
+        app_state.gps_coords = {k: None for k in app_state.gps_coords}
+        
+        logging.info("System stopped and reset")
+        return web.json_response({"status": "stopped", "state": app_state.device_state})
         
     except Exception as e:
         logging.error(f"Error stopping system: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_reset(request):
-    global device_state, session_data, auth_code, runtime, data, history, data_received, gps_coords
-    
+    """Handle system reset for new session"""
     try:
-        device_state = "disconnected"
-        session_data = []
-        auth_code = None
-        runtime = None
-        data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
-        history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
-        data_received = False
-        gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": None}
-        logging.info(f"System reset for new session - State: {device_state}")
-        return web.json_response({"status": "disconnected", "state": device_state})
+        app_state.device_state = "disconnected"
+        app_state.session_data = []
+        app_state.auth_code = None
+        app_state.runtime = None
+        app_state.data = {k: 0 for k in app_state.data}
+        app_state.history = {k: [] for k in app_state.history}
+        app_state.data_received = False
+        app_state.gps_coords = {k: None for k in app_state.gps_coords}
+        
+        logging.info("System reset for new session")
+        return web.json_response({"status": "disconnected", "state": app_state.device_state})
         
     except Exception as e:
         logging.error(f"Error resetting system: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_pdf_download(request):
-    global session_data
-    
+    """Handle PDF report generation and download"""
     try:
-        if not session_data:
-            logging.warning("No session data available for PDF download")
+        if not app_state.session_data:
+            logging.warning("No session data for PDF")
             return web.json_response({"error": "No session data available"}, status=404)
             
-        pdf_filename = generate_pdf(session_data)
+        # Generate PDF
+        pdf_filename = generate_pdf(app_state.session_data)
+        
+        # Create response and schedule file cleanup
         response = web.FileResponse(pdf_filename)
+        response.headers["Content-Disposition"] = f'attachment; filename="{os.path.basename(pdf_filename)}"'
+        
+        # Schedule file cleanup after download
+        asyncio.create_task(cleanup_file(pdf_filename))
+        
         return response
         
     except Exception as e:
         logging.error(f"Error serving PDF: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
-async def handle_root(request):
-    logging.debug("Root endpoint accessed")
-    return web.Response(text=HTML_CONTENT, content_type='text/html')
+async def cleanup_file(filepath):
+    """Clean up temporary files after a delay"""
+    await asyncio.sleep(60)  # Wait 1 minute before cleanup
+    try:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+            logging.info(f"Cleaned up temporary file: {filepath}")
+    except Exception as e:
+        logging.error(f"Error cleaning up file {filepath}: {e}")
 
+async def handle_root(request):
+    """Serve the HTML dashboard"""
+    logging.debug("Serving dashboard")
+    return web.Response(
+        text=HTML_CONTENT,
+        content_type='text/html'
+    )
+
+# Application Setup
 async def init_app():
+    """Initialize the web application"""
     app = web.Application()
+    
+    # Setup routes
     app.router.add_get('/', handle_root)
     app.router.add_route('*', '/data', handle_data)
     app.router.add_post('/setup', handle_setup)
     app.router.add_post('/stop', handle_stop)
     app.router.add_post('/reset', handle_reset)
     app.router.add_get('/download_pdf', handle_pdf_download)
+    
+    # Create temp directory
+    os.makedirs(Config.TEMP_DIR, exist_ok=True)
+    
     return app
 
+async def cleanup_temp_files():
+    """Clean up any remaining temporary files on startup"""
+    try:
+        if os.path.exists(Config.TEMP_DIR):
+            shutil.rmtree(Config.TEMP_DIR)
+            logging.info("Cleaned up temporary files directory")
+    except Exception as e:
+        logging.error(f"Error cleaning up temp files: {e}")
+
 async def main():
+    """Main application entry point"""
+    setup_logging()
+    await cleanup_temp_files()
+    
     try:
         app = await init_app()
         runner = web.AppRunner(app)
         await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', PORT)
+        
+        site = web.TCPSite(runner, '0.0.0.0', Config.PORT)
         await site.start()
-        logging.info(f"Server started at http://0.0.0.0:{PORT}")
+        
+        logging.info(f"Server started at http://0.0.0.0:{Config.PORT}")
+        
+        # Keep server running
         while True:
             await asyncio.sleep(3600)
+            
     except Exception as e:
         logging.error(f"Server error: {e}")
     finally:
         await runner.cleanup()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logging.info("Server stopped by user")
