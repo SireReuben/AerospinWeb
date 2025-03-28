@@ -51,19 +51,259 @@ HTML_CONTENT = '''
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
     <script src="https://maps.googleapis.com/maps/api/js?key=''' + GOOGLE_API_KEY + '''&libraries=places"></script>
     <style>
-        body { font-family: 'Roboto', sans-serif; background-color: #f3f4f6; padding: 20px; }
-        .dashboard { background: #fff; padding: 20px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        .header h1 { font-size: 24px; font-weight: 500; color: #1f2937; }
-        .status-badge { padding: 5px 10px; border-radius: 15px; font-size: 14px; background: #e5e7eb; color: #6b7280; }
-        .status-badge.active { background: #10b981; color: #fff; }
-        .metric-card { background: #fff; padding: 15px; border-radius: 8px; margin-bottom: 20px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-        .metric-title { font-size: 16px; color: #6b7280; margin-bottom: 10px; }
-        .metric-value { font-size: 28px; font-weight: 500; color: #1f2937; }
-        .metric-unit { font-size: 16px; color: #9ca3af; }
-        .chart-container { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); height: 250px; }
-        #map { height: 100%; width: 100%; border-radius: 8px; }
-        .control-card { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        :root {
+            --primary: #4361ee;
+            --secondary: #3a0ca3;
+            --accent: #4cc9f0;
+            --warning: #f72585;
+            --success: #4ade80;
+            --background: #111827;
+            --card-bg: #1f2937;
+            --text: #f9fafb;
+            --text-secondary: #9ca3af;
+            --border: #374151;
+        }
+        body {
+            background: var(--background);
+            color: var(--text);
+            font-family: 'Roboto', sans-serif;
+            margin: 0;
+            padding: 30px;
+            line-height: 1.6;
+        }
+        .container { 
+            max-width: 1300px; 
+            padding: 20px; 
+        }
+        .dashboard {
+            border-radius: 16px;
+            padding: 24px;
+            background: linear-gradient(135deg, 
+                rgba(31, 41, 55, 0.95), 
+                rgba(17, 24, 39, 0.98));
+            border: 1px solid rgba(55, 65, 81, 0.5);
+            box-shadow: 
+                0 15px 35px rgba(0, 0, 0, 0.3), 
+                0 5px 15px rgba(0, 0, 0, 0.2);
+            transition: all 0.3s ease;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .header h1 i { 
+            color: var(--accent); 
+            transition: transform 0.3s ease;
+        }
+        .header h1 i:hover {
+            transform: rotate(15deg) scale(1.1);
+        }
+        .status-badge {
+            background: rgba(67, 97, 238, 0.15);
+            color: var(--accent);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.3s ease;
+        }
+        .status-badge:hover {
+            transform: scale(1.05);
+            background: rgba(67, 97, 238, 0.25);
+        }
+        .status-badge.active {
+            background: rgba(74, 222, 128, 0.15);
+            color: var(--success);
+        }
+        .metric-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 24px;
+            border: 1px solid var(--border);
+            transition: 
+                transform 0.4s cubic-bezier(0.25, 0.1, 0.25, 1),
+                box-shadow 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
+            position: relative;
+            overflow: hidden;
+        }
+        .metric-card::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: linear-gradient(
+                45deg, 
+                transparent, 
+                rgba(255,255,255,0.05), 
+                transparent
+            );
+            transform: rotate(-45deg);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        .metric-card:hover::before {
+            opacity: 1;
+        }
+        .metric-card:hover {
+            transform: translateY(-8px) scale(1.02);
+            box-shadow: 
+                0 15px 30px rgba(0, 0, 0, 0.3), 
+                0 0 20px rgba(67, 97, 238, 0.2);
+        }
+        .metric-title {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+        .metric-value {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 4px;
+            letter-spacing: -1px;
+        }
+        .metric-unit {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-left: 5px;
+        }
+        .chart-container {
+            position: relative;
+            height: 220px;
+            margin-bottom: 24px;
+            background: rgba(31, 41, 55, 0.6);
+            border-radius: 12px;
+            padding: 16px;
+            border: 1px solid var(--border);
+            backdrop-filter: blur(10px);
+            transition: 
+                transform 0.4s cubic-bezier(0.25, 0.1, 0.25, 1),
+                box-shadow 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
+        }
+        .chart-container:hover {
+            transform: translateY(-8px) scale(1.02);
+            box-shadow: 
+                0 15px 30px rgba(0, 0, 0, 0.3), 
+                0 0 20px rgba(67, 97, 238, 0.2);
+        }
+        .control-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 24px;
+            border: 1px solid var(--border);
+            transition: all 0.3s ease;
+        }
+        .control-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 
+                0 10px 20px rgba(0, 0, 0, 0.2);
+        }
+        .btn-primary { 
+            background-color: var(--primary); 
+            border-color: var(--primary); 
+            border-radius: 25px;
+            padding: 10px 20px;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            transition: 
+                background-color 0.3s ease,
+                transform 0.3s ease,
+                box-shadow 0.3s ease;
+        }
+        .btn-primary:hover {
+            background-color: var(--secondary);
+            border-color: var(--secondary);
+            transform: translateY(-3px);
+            box-shadow: 0 7px 14px rgba(0, 0, 0, 0.25);
+        }
+        .btn-danger { 
+            background-color: var(--warning); 
+            border-color: var(--warning); 
+            border-radius: 25px;
+            padding: 10px 20px;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            transition: 
+                background-color 0.3s ease,
+                transform 0.3s ease,
+                box-shadow 0.3s ease;
+        }
+        .btn-danger:hover {
+            background-color: #d3165e;
+            border-color: #d3165e;
+            transform: translateY(-3px);
+            box-shadow: 0 7px 14px rgba(0, 0, 0, 0.25);
+        }
+        .btn-success { 
+            background-color: var(--success); 
+            border-color: var(--success); 
+            border-radius: 25px;
+            padding: 10px 20px;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            transition: 
+                background-color 0.3s ease,
+                transform 0.3s ease,
+                box-shadow 0.3s ease;
+        }
+        .btn-success:hover {
+            background-color: #38b260;
+            border-color: #38b260;
+            transform: translateY(-3px);
+            box-shadow: 0 7px 14px rgba(0, 0, 0, 0.25);
+        }
+        .form-control {
+            background-color: var(--background);
+            color: var(--text);
+            border-color: var(--border);
+            transition: all 0.3s ease;
+        }
+        .form-control:focus {
+            background-color: var(--background);
+            color: var(--text);
+            border-color: var(--primary);
+            outline: none;
+            box-shadow: 
+                0 0 0 3px rgba(67, 97, 238, 0.3),
+                0 0 0 1px rgba(67, 97, 238, 0.8);
+        }
+        #map { 
+            height: 100%; 
+            width: 100%; 
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+        @media (max-width: 768px) {
+            .metric-card, .chart-container {
+                margin-bottom: 15px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -297,7 +537,7 @@ HTML_CONTENT = '''
             document.getElementById('stopButton').addEventListener('click', stopSystem);
             document.getElementById('downloadPdf').addEventListener('click', downloadPdf);
             document.getElementById('startNewSession').addEventListener('click', startNewSession);
-            setInterval(fetchData, 1000); // Poll server for Arduino data
+            setInterval(fetchData, 1000);
         });
 
         async function submitSetup() {
@@ -442,7 +682,6 @@ async def get_gps_from_ip(ip_address):
     """IP-based geolocation for the Arduino device"""
     logging.debug(f"Attempting IP geolocation for: {ip_address}")
     try:
-        # Try Google Geolocation API first
         url = f"https://www.googleapis.com/geolocation/v1/geolocate?key={GOOGLE_API_KEY}"
         payload = {"considerIp": True}
         
@@ -451,7 +690,7 @@ async def get_gps_from_ip(ip_address):
                 if response.status == 200:
                     data = await response.json()
                     accuracy = data.get("accuracy", 0)
-                    if accuracy < 50000:  # Only accept if accuracy < 50km
+                    if accuracy < 50000:
                         logging.info(f"Google Geolocation success: {data}")
                         return {
                             "latitude": data["location"]["lat"],
@@ -460,7 +699,6 @@ async def get_gps_from_ip(ip_address):
                             "accuracy": accuracy
                         }
         
-        # Fallback to IP-API.com
         ip_url = f"http://ip-api.com/json/{ip_address}?fields=status,message,lat,lon"
         async with ClientSession() as session:
             async with session.get(ip_url) as response:
@@ -472,7 +710,7 @@ async def get_gps_from_ip(ip_address):
                             "latitude": ip_data["lat"],
                             "longitude": ip_data["lon"],
                             "source": "ip_api",
-                            "accuracy": 50000  # IP-based is less accurate
+                            "accuracy": 50000
                         }
     
     except Exception as e:
@@ -620,7 +858,7 @@ async def handle_data(request):
         try:
             post_data = await request.json()
             status = post_data.get("status")
-            client_ip = post_data.get("public_ip", request.remote)  # Prefer public_ip from Arduino
+            client_ip = post_data.get("public_ip", request.remote)
             logging.debug(f"Received POST data from IP {client_ip}: {post_data}")
 
             if status == "arduino_ready":
