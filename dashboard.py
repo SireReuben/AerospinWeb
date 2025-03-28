@@ -2,7 +2,7 @@ import json
 import asyncio
 import logging
 import os
-from aiohttp import web
+from aiohttp import web, ClientSession
 import datetime
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,6 +18,7 @@ MAX_HISTORY = 20
 VALID_DEVICE_STATES = ["disconnected", "ready", "waiting", "running", "stopped"]
 VALID_AUTH_CODE_MIN = 100
 VALID_AUTH_CODE_MAX = 999
+GOOGLE_API_KEY = "AIzaSyDpCPfntL6CEXPoOVPf2RmfmCjfV7rfano"  # Replace with your Google API key
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -28,9 +29,24 @@ device_state = "disconnected"
 session_data = []
 auth_code = None
 runtime = None
+gps_coords = {"latitude": None, "longitude": None}
+
+async def get_gps_from_ip(ip_address):
+    url = f"https://www.googleapis.com/geolocation/v1/geolocate?key={GOOGLE_API_KEY}"
+    payload = {"considerIp": True}
+    async with ClientSession() as session:
+        async with session.post(url, json=payload) as response:
+            if response.status == 200:
+                data = await response.json()
+                return {
+                    "latitude": data["location"]["lat"],
+                    "longitude": data["location"]["lng"]
+                }
+            else:
+                logging.error(f"Geolocation API error: {response.status}")
+                return None
 
 def generate_pdf(session_data):
-    """Generate a PDF report from the session data."""
     filename = f"aerospin_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
     doc = SimpleDocTemplate(filename, pagesize=letter)
     styles = getSampleStyleSheet()
@@ -38,6 +54,8 @@ def generate_pdf(session_data):
 
     elements.append(Paragraph("Aerospin Session Report", styles['Title']))
     elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+    if gps_coords["latitude"] and gps_coords["longitude"]:
+        elements.append(Paragraph(f"Location: Lat {gps_coords['latitude']:.6f}, Lon {gps_coords['longitude']:.6f}", styles['Normal']))
     elements.append(Spacer(1, 12))
 
     if not session_data:
@@ -115,14 +133,16 @@ def generate_pdf(session_data):
     elements.append(plt_img)
     plt.close()
 
-    table_data = [["Timestamp", "Temperature (°C)", "Humidity (%)", "Speed (%)", "Time Remaining (s)"]]
+    table_data = [["Timestamp", "Temperature (°C)", "Humidity (%)", "Speed (%)", "Time Remaining (s)", "Latitude", "Longitude"]]
     for entry in session_data:
         table_data.append([
             entry["timestamp"],
             f"{entry['temperature']:.1f}",
             f"{entry['humidity']:.1f}",
             f"{entry['speed']}",
-            f"{entry['remaining']}"
+            f"{entry['remaining']}",
+            f"{entry.get('latitude', 'N/A'):.6f}" if entry.get('latitude') else "N/A",
+            f"{entry.get('longitude', 'N/A'):.6f}" if entry.get('longitude') else "N/A"
         ])
 
     table = Table(table_data)
@@ -145,9 +165,6 @@ def generate_pdf(session_data):
     logging.info(f"PDF generated: {filename}")
     return filename
 
-# [HTML_CONTENT remains unchanged except for the JavaScript part below]
-
-# Updated JavaScript within HTML_CONTENT
 HTML_CONTENT = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -159,6 +176,8 @@ HTML_CONTENT = '''
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         :root {
             --primary: #4361ee;
@@ -402,6 +421,7 @@ HTML_CONTENT = '''
                 0 0 0 3px rgba(67, 97, 238, 0.3),
                 0 0 0 1px rgba(67, 97, 238, 0.8);
         }
+        #map { height: 100%; width: 100%; }
         @media (max-width: 768px) {
             .metric-card, .chart-container {
                 margin-bottom: 15px;
@@ -470,11 +490,17 @@ HTML_CONTENT = '''
                         </button>
                     </div>
                 </div>
+                <div class="col-md-8">
+                    <div class="chart-container" style="height: 300px;">
+                        <div id="map"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
     <script>
         let tempChart, humidChart, speedChart, remainingChart;
+        let map, marker;
         let previousState = "disconnected";
 
         function initCharts() {
@@ -627,6 +653,22 @@ HTML_CONTENT = '''
             remainingChart.update();
         }
 
+        function initMap() {
+            map = L.map('map').setView([0, 0], 2);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+        }
+
+        function updateMap(latitude, longitude) {
+            if (!marker) {
+                marker = L.marker([latitude, longitude]).addTo(map);
+            } else {
+                marker.setLatLng([latitude, longitude]);
+            }
+            map.setView([latitude, longitude], 13);
+        }
+
         function updateSystemStatus(status, isActive = false) {
             const statusElement = document.getElementById('systemStatus');
             statusElement.innerHTML = isActive ? 
@@ -637,6 +679,7 @@ HTML_CONTENT = '''
 
         document.addEventListener('DOMContentLoaded', function() {
             initCharts();
+            initMap();
             document.getElementById('submitSetup').addEventListener('click', submitSetup);
             document.getElementById('stopButton').addEventListener('click', stopSystem);
             document.getElementById('downloadPdf').addEventListener('click', downloadPdf);
@@ -747,6 +790,10 @@ HTML_CONTENT = '''
                     document.getElementById('speed').innerHTML = `${data.speed}<span class="metric-unit">%</span>`;
                     document.getElementById('remaining').innerHTML = `${data.remaining}<span class="metric-unit">s</span>`;
                     updateCharts(data);
+
+                    if (data.gps.latitude && data.gps.longitude) {
+                        updateMap(data.gps.latitude, data.gps.longitude);
+                    }
                 }
 
                 if (currentState === 'disconnected') {
@@ -777,7 +824,7 @@ HTML_CONTENT = '''
 '''
 
 async def handle_data(request):
-    global data, history, device_state, data_received, session_data
+    global data, history, device_state, data_received, session_data, gps_coords
     
     if request.method == "POST":
         try:
@@ -795,6 +842,13 @@ async def handle_data(request):
                         logging.warning("Invalid data types in POST data")
                         return web.json_response({"error": "Invalid data types"}, status=400)
 
+                    public_ip = post_data.get("public_ip")
+                    if public_ip and gps_coords["latitude"] is None:
+                        coords = await get_gps_from_ip(public_ip)
+                        if coords:
+                            gps_coords = coords
+                            logging.info(f"GPS Coordinates fetched: {gps_coords}")
+
                     data_received = True
                     device_state = "running"
                     logging.info(f"State transitioned to: {device_state}")
@@ -804,7 +858,9 @@ async def handle_data(request):
                     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
                     session_data.append({
                         "timestamp": timestamp,
-                        **{k: post_data[k] for k in required_fields}
+                        **{k: post_data[k] for k in required_fields},
+                        "latitude": gps_coords["latitude"],
+                        "longitude": gps_coords["longitude"]
                     })
                     
                     for key in data:
@@ -861,7 +917,8 @@ async def handle_data(request):
         "speed": data["speed"],
         "remaining": data["remaining"],
         "data_received": data_received,
-        "history": history
+        "history": history,
+        "gps": gps_coords
     })
 
 async def handle_setup(request):
@@ -890,7 +947,7 @@ async def handle_setup(request):
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_stop(request):
-    global device_state, session_data, auth_code, runtime, data, history, data_received
+    global device_state, session_data, auth_code, runtime, data, history, data_received, gps_coords
     
     try:
         device_state = "disconnected"
@@ -899,6 +956,7 @@ async def handle_stop(request):
         data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
         history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
         data_received = False
+        gps_coords = {"latitude": None, "longitude": None}
         logging.info(f"System stopped, state and metrics reset - State: {device_state}")
         return web.json_response({"status": "stopped", "state": device_state})
         
@@ -907,7 +965,7 @@ async def handle_stop(request):
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_reset(request):
-    global device_state, session_data, auth_code, runtime, data, history, data_received
+    global device_state, session_data, auth_code, runtime, data, history, data_received, gps_coords
     
     try:
         device_state = "disconnected"
@@ -917,6 +975,7 @@ async def handle_reset(request):
         data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
         history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
         data_received = False
+        gps_coords = {"latitude": None, "longitude": None}
         logging.info(f"System reset for new session - State: {device_state}")
         return web.json_response({"status": "disconnected", "state": device_state})
         
