@@ -979,6 +979,16 @@ HTML_CONTENT = '''
 async def handle_data(request):
     global data, history, device_state, data_received, session_data, gps_coords
     
+    # Handle CORS preflight requests
+    if request.method == "OPTIONS":
+        return web.Response(
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type",
+            }
+        )
+
     if request.method == "POST":
         try:
             post_data = await request.json()
@@ -994,51 +1004,85 @@ async def handle_data(request):
                         "source": "browser_geolocation",
                         "accuracy": post_data.get("accuracy", 0)
                     }
-                # Fallback to IP geolocation if no client-side geolocation
-                elif "public_ip" in post_data and (gps_coords["latitude"] is None or gps_coords.get("accuracy", float('inf')) > 50000):
-                    coords = await get_gps_from_ip(post_data["public_ip"])
-                    if coords["latitude"] is not None:
-                        gps_coords = coords
+                    logging.info(f"Received browser geolocation: {gps_coords}")
+                
+                # Fallback to IP geolocation if no client-side geolocation or if current location is inaccurate
+                elif "public_ip" in post_data and (
+                    gps_coords["latitude"] is None or 
+                    gps_coords.get("accuracy", float('inf')) > 50000
+                ):
+                    try:
+                        coords = await get_gps_from_ip(post_data["public_ip"])
+                        if coords["latitude"] is not None:
+                            gps_coords = coords
+                            logging.info(f"Updated location from IP: {gps_coords}")
+                    except Exception as e:
+                        logging.error(f"Error getting IP geolocation: {e}")
 
+                # Validate and process sensor data
                 required_fields = ['temperature', 'humidity', 'speed', 'remaining']
                 if all(field in post_data for field in required_fields):
+                    # Validate data types
                     if not (isinstance(post_data["temperature"], (int, float)) and 
                             isinstance(post_data["humidity"], (int, float)) and 
                             isinstance(post_data["speed"], int) and 
                             isinstance(post_data["remaining"], int)):
                         logging.warning("Invalid data types in POST data")
-                        return web.json_response({"error": "Invalid data types"}, status=400)
+                        return web.json_response(
+                            {"error": "Invalid data types"}, 
+                            status=400,
+                            headers={"Access-Control-Allow-Origin": "*"}
+                        )
 
+                    # Update system state and data
                     data_received = True
                     device_state = "running"
                     logging.info(f"State transitioned to: {device_state}")
                     
+                    # Update current data
                     data.update({field: post_data[field] for field in required_fields})
                     
+                    # Create and store session record
                     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-                    session_data.append({
+                    session_record = {
                         "timestamp": timestamp,
                         **{k: post_data[k] for k in required_fields},
                         **gps_coords
-                    })
+                    }
+                    session_data.append(session_record)
                     
+                    # Update history (for charts)
                     for key in data:
                         history[key].append(data[key])
                         history[key] = history[key][-MAX_HISTORY:]
                     history["timestamps"].append(timestamp)
                     history["timestamps"] = history["timestamps"][-MAX_HISTORY:]
                     
-                    logging.info(f"Received valid sensor data: {post_data}")
-                    return web.json_response({"status": "success", "state": device_state})
+                    logging.info(f"Stored session data: {session_record}")
+                    return web.json_response(
+                        {
+                            "status": "success", 
+                            "state": device_state,
+                            "gps": gps_coords
+                        },
+                        headers={"Access-Control-Allow-Origin": "*"}
+                    )
                 
                 logging.warning("Missing fields in POST data")
-                return web.json_response({"error": "Missing required fields"}, status=400)
+                return web.json_response(
+                    {"error": "Missing required fields"}, 
+                    status=400,
+                    headers={"Access-Control-Allow-Origin": "*"}
+                )
             
             elif status == "arduino_ready":
                 if device_state == "disconnected":
                     device_state = "ready"
                     logging.info(f"State transitioned to: {device_state}")
-                return web.json_response({"status": "ready", "state": device_state})
+                return web.json_response(
+                    {"status": "ready", "state": device_state},
+                    headers={"Access-Control-Allow-Origin": "*"}
+                )
             
             elif status == "check_auth":
                 if auth_code is not None and runtime is not None:
@@ -1048,27 +1092,47 @@ async def handle_data(request):
                         "code": auth_code,
                         "runtime": runtime,
                         "state": device_state
-                    })
+                    },
+                    headers={"Access-Control-Allow-Origin": "*"})
+                
                 logging.debug("No auth code yet or state not waiting, responding with current state")
-                return web.json_response({"status": "waiting", "state": device_state})
+                return web.json_response(
+                    {"status": "waiting", "state": device_state},
+                    headers={"Access-Control-Allow-Origin": "*"}
+                )
             
             elif status == "start":
                 device_state = "running"
                 logging.info(f"State transitioned to: {device_state}")
-                return web.json_response({"status": "running", "state": device_state})
+                return web.json_response(
+                    {"status": "running", "state": device_state},
+                    headers={"Access-Control-Allow-Origin": "*"}
+                )
             
             elif status == "stopped":
                 device_state = "stopped"
                 logging.info(f"State transitioned to: {device_state}")
-                return web.json_response({"status": "stopped", "state": device_state})
+                return web.json_response(
+                    {"status": "stopped", "state": device_state},
+                    headers={"Access-Control-Allow-Origin": "*"}
+                )
                 
         except json.JSONDecodeError:
             logging.error("Invalid JSON received")
-            return web.json_response({"error": "Invalid JSON"}, status=400)
+            return web.json_response(
+                {"error": "Invalid JSON"}, 
+                status=400,
+                headers={"Access-Control-Allow-Origin": "*"}
+            )
         except Exception as e:
             logging.error(f"Error processing data: {e}")
-            return web.json_response({"error": "Internal server error"}, status=500)
+            return web.json_response(
+                {"error": "Internal server error"}, 
+                status=500,
+                headers={"Access-Control-Allow-Origin": "*"}
+            )
     
+    # Handle GET requests
     return web.json_response({
         "state": device_state,
         "temperature": data["temperature"],
@@ -1078,7 +1142,9 @@ async def handle_data(request):
         "data_received": data_received,
         "history": history,
         "gps": gps_coords
-    })
+    },
+    headers={"Access-Control-Allow-Origin": "*"})
+
 
 async def handle_setup(request):
     global auth_code, runtime, device_state
