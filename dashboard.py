@@ -12,6 +12,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.lib.styles import getSampleStyleSheet
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from cachetools import TTLCache  # Added for VPN caching
 
 PORT = int(os.environ.get("PORT", 10000))
 MAX_HISTORY = 20
@@ -37,6 +38,77 @@ session_data = []
 auth_code = None
 runtime = None
 gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": None}
+vpn_cache = TTLCache(maxsize=100, ttl=300)  # Cache for 5 minutes, 100 IPs
+vpn_info = {"is_vpn": False, "confidence": 0, "details": "No data yet"}
+
+async def check_vpn(ip_address):
+    """Enhanced VPN detection with caching"""
+    if ip_address in vpn_cache:
+        logging.debug(f"VPN status from cache for {ip_address}")
+        return vpn_cache[ip_address]
+    
+    vpn_indicators = []
+    confidence_score = 0
+    
+    try:
+        async with ClientSession() as session:
+            # ip-api.com
+            url = f"http://ip-api.com/json/{ip_address}?fields=status,message,proxy,hosting,org"
+            async with session.get(url, timeout=5) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get("status") == "success":
+                        if data.get("proxy", False):
+                            vpn_indicators.append("Proxy detected")
+                            confidence_score += 40
+                        if data.get("hosting", False):
+                            vpn_indicators.append("Hosting provider")
+                            confidence_score += 30
+                        org = data.get("org", "").lower()
+                        if any(keyword in org for keyword in ["vpn", "proxy", "cloud", "hosting"]):
+                            vpn_indicators.append(f"Org: {org}")
+                            confidence_score += 20
+
+            # ipinfo.io
+            url = f"https://ipinfo.io/{ip_address}/json"
+            async with session.get(url, timeout=5) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get("vpn", False):
+                        vpn_indicators.append("VPN flagged")
+                        confidence_score += 50
+                    if "org" in data and any(keyword in data["org"].lower() for keyword in ["vpn", "proxy"]):
+                        vpn_indicators.append(f"Org: {data['org']}")
+                        confidence_score += 20
+
+            # db-ip.com
+            url = f"https://api.db-ip.com/v2/free/{ip_address}"
+            async with session.get(url, timeout=5) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get("isDatacenter", False):
+                        vpn_indicators.append("Datacenter IP")
+                        confidence_score += 35
+                    if "isp" in data and any(keyword in data["isp"].lower() for keyword in ["vpn", "proxy", "cloud"]):
+                        vpn_indicators.append(f"ISP: {data['isp']}")
+                        confidence_score += 25
+
+        is_vpn = confidence_score >= 50
+        details = "; ".join(vpn_indicators) if vpn_indicators else "No VPN indicators"
+        vpn_info = {
+            "is_vpn": is_vpn,
+            "confidence": min(confidence_score, 100),
+            "details": f"{details} (Note: Detection is approximate)"
+        }
+        
+        vpn_cache[ip_address] = vpn_info
+        logging.info(f"VPN check for {ip_address}: {vpn_info}")
+        return vpn_info
+    except Exception as e:
+        logging.error(f"VPN check failed for {ip_address}: {e}")
+        vpn_info = {"is_vpn": False, "confidence": 0, "details": f"Check failed: {str(e)}"}
+        vpn_cache[ip_address] = vpn_info
+        return vpn_info
 
 HTML_CONTENT = '''
 <!DOCTYPE html>
@@ -299,6 +371,33 @@ HTML_CONTENT = '''
             border-radius: 12px;
             border: 1px solid var(--border);
         }
+        .vpn-tooltip {
+            position: relative;
+            display: inline-block;
+            cursor: help;
+        }
+        .vpn-tooltip .tooltip-text {
+            visibility: hidden;
+            width: 250px;
+            background-color: #1f2937;
+            color: #f9fafb;
+            text-align: center;
+            border-radius: 6px;
+            padding: 8px;
+            position: absolute;
+            z-index: 1;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -125px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            border: 1px solid #4cc9f0;
+            font-size: 12px;
+        }
+        .vpn-tooltip:hover .tooltip-text {
+            visibility: visible;
+            opacity: 1;
+        }
         @media (max-width: 768px) {
             .metric-card, .chart-container {
                 margin-bottom: 15px;
@@ -333,17 +432,25 @@ HTML_CONTENT = '''
                     </div>
                 </div>
                 <div class="col-md-3">
+                    <div class="metric-card vpn-status">
+                        <div class="metric-title"><i class="ri-shield-check-line"></i> VPN Status</div>
+                        <div id="vpnStatus" class="metric-value vpn-tooltip">
+                            Unknown
+                            <span class="tooltip-text" id="vpnDetails">No data yet</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-3">
                     <div class="metric-card remaining">
                         <div class="metric-title"><i class="ri-time-line"></i> Time Remaining</div>
                         <div id="remaining" class="metric-value">0<span class="metric-unit">s</span></div>
                     </div>
                 </div>
-            </div>
-            <div class="row">
                 <div class="col-md-3"><div class="chart-container"><canvas id="tempChart"></canvas></div></div>
                 <div class="col-md-3"><div class="chart-container"><canvas id="humidChart"></canvas></div></div>
                 <div class="col-md-3"><div class="chart-container"><canvas id="speedChart"></canvas></div></div>
-                <div class="col-md-3"><div class="chart-container"><canvas id="remainingChart"></canvas></div></div>
             </div>
             <div class="row">
                 <div class="col-md-4">
@@ -643,6 +750,14 @@ HTML_CONTENT = '''
                     document.getElementById('humidity').innerHTML = `${data.humidity.toFixed(1)}<span class="metric-unit">%</span>`;
                     document.getElementById('speed').innerHTML = `${data.speed}<span class="metric-unit">%</span>`;
                     document.getElementById('remaining').innerHTML = `${data.remaining}<span class="metric-unit">s</span>`;
+                    const vpnStatus = document.getElementById('vpnStatus');
+                    const vpnDetails = document.getElementById('vpnDetails');
+                    if (data.vpn_info) {
+                        vpnStatus.innerHTML = data.vpn_info.is_vpn ? 
+                            `<span style="color: #f72585">Active (${data.vpn_info.confidence}%)</span>` : 
+                            `<span style="color: #4ade80">Inactive (${data.vpn_info.confidence}%)</span>`;
+                        vpnDetails.textContent = data.vpn_info.details;
+                    }
                     updateCharts(data);
 
                     if (data.gps?.latitude && data.gps?.longitude) {
@@ -843,7 +958,7 @@ def generate_pdf(session_data):
     return filename
 
 async def handle_data(request):
-    global data, history, device_state, data_received, session_data, gps_coords
+    global data, history, device_state, data_received, session_data, gps_coords, vpn_info
     
     if request.method == "OPTIONS":
         return web.Response(
@@ -860,6 +975,8 @@ async def handle_data(request):
             status = post_data.get("status")
             client_ip = post_data.get("public_ip", request.remote)
             logging.debug(f"Received POST data from IP {client_ip}: {post_data}")
+
+            vpn_info = await check_vpn(client_ip)
 
             if status == "arduino_ready":
                 if device_state == "disconnected":
@@ -947,7 +1064,8 @@ async def handle_data(request):
                         {
                             "status": "success", 
                             "state": device_state,
-                            "gps": gps_coords
+                            "gps": gps_coords,
+                            "vpn_info": vpn_info
                         },
                         headers={"Access-Control-Allow-Origin": "*"}
                     )
@@ -983,7 +1101,8 @@ async def handle_data(request):
         "remaining": data["remaining"],
         "data_received": data_received,
         "history": history,
-        "gps": gps_coords
+        "gps": gps_coords,
+        "vpn_info": vpn_info
     },
     headers={"Access-Control-Allow-Origin": "*"})
 
@@ -1013,7 +1132,7 @@ async def handle_setup(request):
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_stop(request):
-    global device_state, session_data, auth_code, runtime, data, history, data_received, gps_coords
+    global device_state, session_data, auth_code, runtime, data, history, data_received, gps_coords, vpn_info
     
     try:
         device_state = "disconnected"
@@ -1023,6 +1142,7 @@ async def handle_stop(request):
         history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
         data_received = False
         gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": None}
+        vpn_info = {"is_vpn": False, "confidence": 0, "details": "No data yet"}
         logging.info(f"System stopped, state and metrics reset - State: {device_state}")
         return web.json_response({"status": "stopped", "state": device_state})
         
@@ -1031,7 +1151,7 @@ async def handle_stop(request):
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_reset(request):
-    global device_state, session_data, auth_code, runtime, data, history, data_received, gps_coords
+    global device_state, session_data, auth_code, runtime, data, history, data_received, gps_coords, vpn_info
     
     try:
         device_state = "disconnected"
@@ -1042,6 +1162,7 @@ async def handle_reset(request):
         history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
         data_received = False
         gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": None}
+        vpn_info = {"is_vpn": False, "confidence": 0, "details": "No data yet"}
         logging.info(f"System reset for new session - State: {device_state}")
         return web.json_response({"status": "disconnected", "state": device_state})
         
