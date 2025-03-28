@@ -20,7 +20,15 @@ VALID_AUTH_CODE_MIN = 100
 VALID_AUTH_CODE_MAX = 999
 GOOGLE_API_KEY = "AIzaSyDpCPfntL6CEXPoOVPf2RmfmCjfV7rfano"  # Replace with your Google API key
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+# Enhanced logging configuration
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("server.log")  # Log to a file for debugging
+    ]
+)
 
 data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
 history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
@@ -33,6 +41,7 @@ gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": N
 
 async def get_gps_from_ip(ip_address):
     """Improved geolocation with multiple fallbacks"""
+    logging.debug(f"Attempting IP geolocation for: {ip_address}")
     try:
         # Try Google Geolocation API first
         url = f"https://www.googleapis.com/geolocation/v1/geolocate?key={GOOGLE_API_KEY}"
@@ -44,6 +53,7 @@ async def get_gps_from_ip(ip_address):
                     data = await response.json()
                     accuracy = data.get("accuracy", 0)
                     if accuracy < 50000:  # Only accept if accuracy < 50km
+                        logging.info(f"Google Geolocation success: {data}")
                         return {
                             "latitude": data["location"]["lat"],
                             "longitude": data["location"]["lng"],
@@ -58,6 +68,7 @@ async def get_gps_from_ip(ip_address):
                 if response.status == 200:
                     ip_data = await response.json()
                     if ip_data.get("status") == "success":
+                        logging.info(f"IP-API success: {ip_data}")
                         return {
                             "latitude": ip_data["lat"],
                             "longitude": ip_data["lon"],
@@ -68,6 +79,7 @@ async def get_gps_from_ip(ip_address):
     except Exception as e:
         logging.error(f"Geolocation error: {e}")
     
+    logging.warning(f"No valid geolocation data for IP: {ip_address}")
     return {"latitude": None, "longitude": None, "source": None, "accuracy": None}
 
 def generate_pdf(session_data):
@@ -79,7 +91,9 @@ def generate_pdf(session_data):
     elements.append(Paragraph("Aerospin Session Report", styles['Title']))
     elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
     if gps_coords["latitude"] and gps_coords["longitude"]:
-        elements.append(Paragraph(f"Location: Lat {gps_coords['latitude']:.6f}, Lon {gps_coords['longitude']:.6f} "
+        elements.append(Paragraph(f"Location: Lat { 
+   
+gps_coords['latitude']:.6f}, Lon {gps_coords['longitude']:.6f} "
                                 f"(Source: {gps_coords['source']}, Accuracy: {gps_coords['accuracy']}m)", styles['Normal']))
     elements.append(Spacer(1, 12))
 
@@ -923,7 +937,7 @@ HTML_CONTENT = '''
                     document.body.appendChild(a);
                     a.click();
                     a.remove();
-                    window.URL.revokeObjectURL [=url);
+                    window.URL.revokeObjectURL(url);
                 } else {
                     alert('No report available.');
                 }
@@ -1027,7 +1041,50 @@ async def handle_data(request):
             status = post_data.get("status")
             logging.debug(f"Received POST data: {post_data}")
 
-            if status == "data":
+            if status == "arduino_ready":
+                if device_state == "disconnected":
+                    device_state = "ready"
+                    logging.info(f"Arduino detected, state transitioned to: {device_state}")
+                else:
+                    logging.info(f"Arduino ready received, current state: {device_state}")
+                return web.json_response(
+                    {"status": "ready", "state": device_state},
+                    headers={"Access-Control-Allow-Origin": "*"}
+                )
+            
+            elif status == "check_auth":
+                if auth_code is not None and runtime is not None:
+                    logging.info(f"Sending auth_code: {auth_code}, runtime: {runtime}")
+                    return web.json_response({
+                        "status": "auth_code",
+                        "code": auth_code,
+                        "runtime": runtime,
+                        "state": device_state
+                    },
+                    headers={"Access-Control-Allow-Origin": "*"})
+                logging.debug(f"No auth code yet, state: {device_state}")
+                return web.json_response(
+                    {"status": "waiting", "state": device_state},
+                    headers={"Access-Control-Allow-Origin": "*"}
+                )
+            
+            elif status == "start":
+                device_state = "running"
+                logging.info(f"State transitioned to: {device_state}")
+                return web.json_response(
+                    {"status": "running", "state": device_state},
+                    headers={"Access-Control-Allow-Origin": "*"}
+                )
+            
+            elif status == "stopped":
+                device_state = "stopped"
+                logging.info(f"State transitioned to: {device_state}")
+                return web.json_response(
+                    {"status": "stopped", "state": device_state},
+                    headers={"Access-Control-Allow-Origin": "*"}
+                )
+            
+            elif status == "data":
                 # Handle client-side geolocation if provided
                 if "latitude" in post_data and "longitude" in post_data:
                     gps_coords = {
@@ -1063,7 +1120,7 @@ async def handle_data(request):
                     # Update system state and data
                     data_received = True
                     device_state = "running"
-                    logging.info(f"State transitioned to: {device_state}")
+                    logging.info(f"Arduino data received, state transitioned to: {device_state}")
                     
                     # Update current data
                     data.update({field: post_data[field] for field in required_fields})
@@ -1100,48 +1157,6 @@ async def handle_data(request):
                     status=400,
                     headers={"Access-Control-Allow-Origin": "*"}
                 )
-            
-            elif status == "arduino_ready":
-                if device_state == "disconnected":
-                    device_state = "ready"
-                    logging.info(f"State transitioned to: {device_state}")
-                return web.json_response(
-                    {"status": "ready", "state": device_state},
-                    headers={"Access-Control-Allow-Origin": "*"}
-                )
-            
-            elif status == "check_auth":
-                if auth_code is not None and runtime is not None:
-                    logging.info(f"Sending auth_code: {auth_code}, runtime: {runtime}")
-                    return web.json_response({
-                        "status": "auth_code",
-                        "code": auth_code,
-                        "runtime": runtime,
-                        "state": device_state
-                    },
-                    headers={"Access-Control-Allow-Origin": "*"})
-                
-                logging.debug("No auth code yet or state not waiting, responding with current state")
-                return web.json_response(
-                    {"status": "waiting", "state": device_state},
-                    headers={"Access-Control-Allow-Origin": "*"}
-                )
-            
-            elif status == "start":
-                device_state = "running"
-                logging.info(f"State transitioned to: {device_state}")
-                return web.json_response(
-                    {"status": "running", "state": device_state},
-                    headers={"Access-Control-Allow-Origin": "*"}
-                )
-            
-            elif status == "stopped":
-                device_state = "stopped"
-                logging.info(f"State transitioned to: {device_state}")
-                return web.json_response(
-                    {"status": "stopped", "state": device_state},
-                    headers={"Access-Control-Allow-Origin": "*"}
-                )
                 
         except json.JSONDecodeError:
             logging.error("Invalid JSON received")
@@ -1159,6 +1174,7 @@ async def handle_data(request):
             )
     
     # Handle GET requests
+    logging.debug(f"GET request received, current state: {device_state}")
     return web.json_response({
         "state": device_state,
         "temperature": data["temperature"],
@@ -1170,7 +1186,6 @@ async def handle_data(request):
         "gps": gps_coords
     },
     headers={"Access-Control-Allow-Origin": "*"})
-
 
 async def handle_setup(request):
     global auth_code, runtime, device_state
@@ -1251,6 +1266,7 @@ async def handle_pdf_download(request):
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_root(request):
+    logging.debug("Root endpoint accessed")
     return web.Response(text=HTML_CONTENT, content_type='text/html')
 
 async def init_app():
