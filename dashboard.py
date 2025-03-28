@@ -38,13 +38,15 @@ async def get_gps_from_ip(ip_address):
         async with session.post(url, json=payload) as response:
             if response.status == 200:
                 data = await response.json()
+                logging.info(f"Geolocation API response for IP {ip_address}: {data}")
                 return {
                     "latitude": data["location"]["lat"],
                     "longitude": data["location"]["lng"]
                 }
             else:
-                logging.error(f"Geolocation API error: {response.status}")
-                return None
+                error_text = await response.text()
+                logging.error(f"Geolocation API error: {response.status} - {error_text}")
+                return {"latitude": 51.505, "longitude": -0.09}  # Fallback to London
 
 def generate_pdf(session_data):
     filename = f"aerospin_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
@@ -845,9 +847,8 @@ async def handle_data(request):
                     public_ip = post_data.get("public_ip")
                     if public_ip and gps_coords["latitude"] is None:
                         coords = await get_gps_from_ip(public_ip)
-                        if coords:
-                            gps_coords = coords
-                            logging.info(f"GPS Coordinates fetched: {gps_coords}")
+                        gps_coords = coords
+                        logging.info(f"GPS Coordinates fetched: {gps_coords}")
 
                     data_received = True
                     device_state = "running"
