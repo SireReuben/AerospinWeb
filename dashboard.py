@@ -988,13 +988,13 @@ async def handle_data(request):
             vpn_info = await check_vpn(client_ip)
 
             if status == "arduino_ready":
-                if device_state == "disconnected":
-                    device_state = "ready"
-                    logging.info(f"Arduino detected at {client_ip}, state transitioned to: {device_state}")
-                return web.json_response(
-                    {"status": "ready", "state": device_state},
-                    headers={"Access-Control-Allow-Origin": "*"}
-                )
+    if device_state == "disconnected":
+        device_state = "ready"
+        logging.info(f"Arduino detected at {client_ip}, state transitioned to: {device_state}")
+    return web.json_response(
+        {"status": "arduino_ready", "state": device_state},  # Changed from "ready" to "arduino_ready"
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
             
             elif status == "check_auth":
                 if auth_code is not None and runtime is not None:
