@@ -12,6 +12,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.lib.styles import getSampleStyleSheet
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from ipaddress import ip_address
 
 PORT = int(os.environ.get("PORT", 10000))
 MAX_HISTORY = 20
@@ -39,6 +40,31 @@ auth_code = None
 runtime = None
 gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": None}
 
+def get_client_ip(request):
+    """Get client IP considering proxy headers"""
+    peername = request.transport.get_extra_info('peername')
+    if peername is not None:
+        host = peername[0]
+    
+    # Check for common proxy headers
+    forwarded_for = request.headers.get('X-Forwarded-For')
+    if forwarded_for:
+        ips = [ip.strip() for ip in forwarded_for.split(',')]
+        try:
+            # Get the first public IP in the chain
+            for ip in ips:
+                if not ip_address(ip).is_private:
+                    return ip
+            return ips[0]  # Fallback to first IP if all are private
+        except ValueError:
+            pass
+    
+    real_ip = request.headers.get('X-Real-IP')
+    if real_ip:
+        return real_ip
+    
+    return host
+
 async def get_gps_from_ip(ip_address):
     """Improved geolocation with multiple fallbacks"""
     logging.debug(f"Attempting IP geolocation for: {ip_address}")
@@ -62,18 +88,23 @@ async def get_gps_from_ip(ip_address):
                         }
         
         # Fallback to IP-API.com
-        ip_url = f"http://ip-api.com/json/{ip_address}?fields=status,message,lat,lon"
+        ip_url = f"http://ip-api.com/json/{ip_address}?fields=status,message,lat,lon,isp,org,as,query"
         async with ClientSession() as session:
             async with session.get(ip_url) as response:
                 if response.status == 200:
                     ip_data = await response.json()
                     if ip_data.get("status") == "success":
                         logging.info(f"IP-API success: {ip_data}")
+                        # Calculate approximate accuracy based on ISP data
+                        accuracy = 5000  # Base accuracy for city-level
+                        if 'isp' in ip_data and any(mobile in ip_data['isp'].lower() 
+                           for mobile in ['mobile', 'cellular', '3g', '4g', '5g']):
+                            accuracy = 1000  # Better accuracy for mobile networks
                         return {
                             "latitude": ip_data["lat"],
                             "longitude": ip_data["lon"],
                             "source": "ip_api",
-                            "accuracy": 50000  # IP-based is less accurate
+                            "accuracy": accuracy
                         }
     
     except Exception as e:
@@ -248,6 +279,7 @@ def generate_pdf(session_data):
         doc.build(error_elements)
         return filename
 
+#
 HTML_CONTENT = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -1095,6 +1127,7 @@ HTML_CONTENT = '''
 </html>
 '''
 
+
 async def handle_data(request):
     global data, history, device_state, data_received, session_data, gps_coords
     
@@ -1111,10 +1144,9 @@ async def handle_data(request):
         try:
             post_data = await request.json()
             status = post_data.get("status")
-            client_ip = request.remote
+            client_ip = get_client_ip(request)
             logging.debug(f"Received POST data from {client_ip}: {post_data}")
 
-            # Handle different status cases
             if status == "arduino_ready":
                 if device_state == "disconnected":
                     device_state = "ready"
@@ -1184,10 +1216,10 @@ async def handle_data(request):
                 required_fields = ['temperature', 'humidity', 'speed', 'remaining']
                 if all(field in post_data for field in required_fields):
                     # Validate data types
-                    if not (isinstance(post_data["temperature"], (int, float)) or \
-                       not isinstance(post_data["humidity"], (int, float)) or \
-                       not isinstance(post_data["speed"], int) or \
-                       not isinstance(post_data["remaining"], int):
+                    if (not isinstance(post_data["temperature"], (int, float)) or 
+                        not isinstance(post_data["humidity"], (int, float)) or 
+                        not isinstance(post_data["speed"], int) or 
+                        not isinstance(post_data["remaining"], int)):
                         logging.warning("Invalid data types in POST data")
                         return web.json_response(
                             {"error": "Invalid data types"}, 
@@ -1263,7 +1295,6 @@ async def handle_data(request):
         "gps": gps_coords
     },
     headers={"Access-Control-Allow-Origin": "*"})
-
 async def handle_setup(request):
     global auth_code, runtime, device_state
     
