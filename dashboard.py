@@ -91,10 +91,11 @@ def generate_pdf(session_data):
     elements.append(Paragraph("Aerospin Session Report", styles['Title']))
     elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
     if gps_coords["latitude"] and gps_coords["longitude"]:
-        elements.append(Paragraph(f"Location: Lat { 
-   
-gps_coords['latitude']:.6f}, Lon {gps_coords['longitude']:.6f} "
-                                f"(Source: {gps_coords['source']}, Accuracy: {gps_coords['accuracy']}m)", styles['Normal']))
+        elements.append(Paragraph(
+            f"Location: Lat {gps_coords['latitude']:.6f}, Lon {gps_coords['longitude']:.6f} "
+            f"(Source: {gps_coords['source']}, Accuracy: {gps_coords['accuracy']}m)",
+            styles['Normal']
+        ))
     elements.append(Spacer(1, 12))
 
     if not session_data:
