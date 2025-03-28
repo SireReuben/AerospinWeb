@@ -2,7 +2,7 @@ import json
 import asyncio
 import logging
 import os
-from aiohttp import web, ClientSession
+from aiohttp import web, ClientSession, WSMsgType
 import datetime
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,17 +13,21 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
+# Configuration
 PORT = int(os.environ.get("PORT", 10000))
 MAX_HISTORY = 20
 VALID_DEVICE_STATES = ["disconnected", "ready", "waiting", "running", "stopped"]
 VALID_AUTH_CODE_MIN = 100
 VALID_AUTH_CODE_MAX = 999
-GOOGLE_API_KEY = "AIzaSyDpCPfntL6CEXPoOVPf2RmfmCjfV7rfano"  # Replace with your Google API key
+GOOGLE_API_KEY = "AIzaSyDpCPfntL6CEXPoOVPf2RmfmCjfV7rfano"  # Replace with your actual Google API key
+MAX_ACCURACY = 50000  # Max acceptable accuracy in meters (50km)
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# In-memory storage (replace with database in production)
 data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
 history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
+devices = {}  # For tracking multiple devices
 data_received = False
 device_state = "disconnected"
 session_data = []
@@ -32,19 +36,36 @@ runtime = None
 gps_coords = {"latitude": None, "longitude": None}
 
 async def get_gps_from_ip(ip_address):
+    """Get location from IP using Google's Geolocation API"""
+    if not ip_address or ip_address == "Unknown":
+        return None
+
     url = f"https://www.googleapis.com/geolocation/v1/geolocate?key={GOOGLE_API_KEY}"
-    payload = {"considerIp": True}
-    async with ClientSession() as session:
-        async with session.post(url, json=payload) as response:
-            if response.status == 200:
-                data = await response.json()
-                return {
-                    "latitude": data["location"]["lat"],
-                    "longitude": data["location"]["lng"]
-                }
-            else:
-                logging.error(f"Geolocation API error: {response.status}")
-                return None
+    payload = {
+        "considerIp": True,
+        "wifiAccessPoints": [],
+        "cellTowers": [],
+        "ipAddress": ip_address
+    }
+
+    try:
+        async with ClientSession() as session:
+            async with session.post(url, json=payload) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    accuracy = data.get('accuracy', MAX_ACCURACY)
+                    
+                    if accuracy <= MAX_ACCURACY:
+                        return {
+                            'latitude': data['location']['lat'],
+                            'longitude': data['location']['lng'],
+                            'accuracy': accuracy,
+                            'timestamp': datetime.datetime.utcnow().isoformat(),
+                            'source': 'ip_geolocation'
+                        }
+    except Exception as e:
+        logging.error(f"Geolocation error: {str(e)}")
+    return None
 
 def generate_pdf(session_data):
     filename = f"aerospin_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
@@ -171,7 +192,7 @@ HTML_CONTENT = '''
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aerospin Control Center</title>
+    <title>Aerospin Control & Tracker Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
@@ -200,7 +221,7 @@ HTML_CONTENT = '''
             line-height: 1.6;
         }
         .container { 
-            max-width: 1300px; 
+            max-width: 1400px; 
             padding: 20px; 
         }
         .dashboard {
@@ -421,7 +442,10 @@ HTML_CONTENT = '''
                 0 0 0 3px rgba(67, 97, 238, 0.3),
                 0 0 0 1px rgba(67, 97, 238, 0.8);
         }
-        #map { height: 100%; width: 100%; }
+        #map { height: 400px; width: 100%; border-radius: 8px; }
+        .device-card { margin-bottom: 15px; }
+        .accuracy-circle { stroke: true; color: "#0078A8"; fillOpacity: 0.2; }
+        #device-list { max-height: 400px; overflow-y: auto; }
         @media (max-width: 768px) {
             .metric-card, .chart-container {
                 margin-bottom: 15px;
@@ -433,7 +457,7 @@ HTML_CONTENT = '''
     <div class="container" id="dashboard">
         <div class="dashboard">
             <div class="header">
-                <h1><i class="ri-dashboard-3-line"></i> Aerospin Control Center</h1>
+                <h1><i class="ri-dashboard-3-line"></i> Aerospin Control & Tracker Dashboard</h1>
                 <div id="systemStatus" class="status-badge"><i class="ri-focus-3-line"></i> Disconnected</div>
             </div>
             <div class="row">
@@ -469,7 +493,7 @@ HTML_CONTENT = '''
                 <div class="col-md-3"><div class="chart-container"><canvas id="remainingChart"></canvas></div></div>
             </div>
             <div class="row">
-                <div class="col-md-4">
+                <div class="col-md-3">
                     <div class="control-card">
                         <h4 class="mb-3">Control Panel</h4>
                         <div class="mb-3">
@@ -489,9 +513,13 @@ HTML_CONTENT = '''
                             <i class="ri-restart-line"></i> New Session
                         </button>
                     </div>
+                    <div class="control-card">
+                        <h4 class="mb-3">Connected Devices</h4>
+                        <div id="device-list"></div>
+                    </div>
                 </div>
-                <div class="col-md-8">
-                    <div class="chart-container" style="height: 300px;">
+                <div class="col-md-9">
+                    <div class="chart-container" style="height: 400px;">
                         <div id="map"></div>
                     </div>
                 </div>
@@ -500,8 +528,10 @@ HTML_CONTENT = '''
     </div>
     <script>
         let tempChart, humidChart, speedChart, remainingChart;
-        let map, marker;
+        let map, currentMarker, accuracyCircle;
         let previousState = "disconnected";
+        let currentDevice = null;
+        const deviceMarkers = {};
 
         function initCharts() {
             const commonOptions = {
@@ -660,13 +690,26 @@ HTML_CONTENT = '''
             }).addTo(map);
         }
 
-        function updateMap(latitude, longitude) {
-            if (!marker) {
-                marker = L.marker([latitude, longitude]).addTo(map);
+        function updateMap(latitude, longitude, accuracy = null) {
+            if (!currentMarker) {
+                currentMarker = L.marker([latitude, longitude]).addTo(map);
             } else {
-                marker.setLatLng([latitude, longitude]);
+                currentMarker.setLatLng([latitude, longitude]);
             }
-            map.setView([latitude, longitude], 13);
+            
+            if (accuracyCircle) {
+                map.removeLayer(accuracyCircle);
+            }
+            
+            if (accuracy) {
+                accuracyCircle = L.circle([latitude, longitude], {
+                    radius: accuracy,
+                    className: 'accuracy-circle'
+                }).addTo(map);
+                map.fitBounds(accuracyCircle.getBounds());
+            } else {
+                map.setView([latitude, longitude], 13);
+            }
         }
 
         function updateSystemStatus(status, isActive = false) {
@@ -677,6 +720,73 @@ HTML_CONTENT = '''
             statusElement.className = isActive ? 'status-badge active' : 'status-badge';
         }
 
+        function connectWebSocket(deviceId) {
+            if (window.ws) {
+                window.ws.close();
+            }
+
+            const ws = new WebSocket(`ws://${window.location.host}/ws?device_id=${deviceId}`);
+            
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                updateDeviceDisplay(data);
+            };
+            
+            ws.onclose = function() {
+                console.log('WebSocket disconnected');
+                setTimeout(() => connectWebSocket(deviceId), 5000);
+            };
+            
+            window.ws = ws;
+        }
+
+        function updateDeviceDisplay(data) {
+            currentDevice = data.device_id;
+            
+            const deviceElement = document.getElementById(`device-${data.device_id}`) || 
+                createDeviceElement(data);
+                
+            document.querySelectorAll('.device-card').forEach(el => {
+                el.classList.remove('active');
+            });
+            deviceElement.classList.add('active');
+            
+            const coords = [data.location.latitude, data.location.longitude];
+            updateMap(data.location.latitude, data.location.longitude, data.location.accuracy);
+            
+            const popupContent = `
+                <b>${data.info.device_name || 'Unknown Device'}</b><br>
+                Device ID: ${data.device_id}<br>
+                Local IP: ${data.info.local_ip || 'Unknown'}<br>
+                Signal: ${data.info.rssi || '?'} dBm<br>
+                Updated: ${new Date(data.location.timestamp).toLocaleString()}<br>
+                ${data.location.accuracy ? `Accuracy: ~${Math.round(data.location.accuracy)} meters` : ''}
+            `;
+            
+            currentMarker.bindPopup(popupContent).openPopup();
+        }
+
+        function createDeviceElement(data) {
+            const deviceList = document.getElementById('device-list');
+            const card = document.createElement('div');
+            card.id = `device-${data.device_id}`;
+            card.className = 'card device-card';
+            card.innerHTML = `
+                <div class="card-body" onclick="selectDevice('${data.device_id}')">
+                    <h6>${data.info.device_name || 'Unknown Device'}</h6>
+                    <p class="mb-1">ID: ${data.device_id}</p>
+                    <p class="mb-1">IP: ${data.info.local_ip || 'Unknown'}</p>
+                    <p class="mb-0">Signal: ${data.info.rssi || '?'} dBm</p>
+                </div>
+            `;
+            deviceList.appendChild(card);
+            return card;
+        }
+
+        function selectDevice(deviceId) {
+            connectWebSocket(deviceId);
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             initCharts();
             initMap();
@@ -685,6 +795,26 @@ HTML_CONTENT = '''
             document.getElementById('downloadPdf').addEventListener('click', downloadPdf);
             document.getElementById('startNewSession').addEventListener('click', startNewSession);
             setInterval(fetchData, 1000);
+            
+            // Initial load - fetch devices
+            fetch('/devices')
+                .then(res => res.json())
+                .then(data => {
+                    for (const [deviceId, device] of Object.entries(data.devices)) {
+                        const card = document.createElement('div');
+                        card.id = `device-${deviceId}`;
+                        card.className = 'card device-card';
+                        card.innerHTML = `
+                            <div class="card-body" onclick="selectDevice('${deviceId}')">
+                                <h6>${device.info.device_name || 'Unknown Device'}</h6>
+                                <p class="mb-1">ID: ${deviceId}</p>
+                                <p class="mb-1">IP: ${device.info.local_ip || 'Unknown'}</p>
+                                <p class="mb-0">Last seen: ${device.last_seen ? new Date(device.last_seen).toLocaleString() : 'Never'}</p>
+                            </div>
+                        `;
+                        document.getElementById('device-list').appendChild(card);
+                    }
+                });
         });
 
         async function submitSetup() {
@@ -823,6 +953,120 @@ HTML_CONTENT = '''
 </html>
 '''
 
+
+async def handle_location(request):
+    """Handle device location updates"""
+    try:
+        data = await request.json()
+        device_id = data.get('device_id')
+        ip_address = data.get('ip_address')
+        
+        if not all([device_id, ip_address]):
+            return web.json_response({'error': 'Missing required fields'}, status=400)
+
+        # Get or update device information
+        if device_id not in devices:
+            devices[device_id] = {
+                'info': {k: data[k] for k in ['device_name', 'local_ip', 'rssi'] if k in data},
+                'locations': [],
+                'websockets': [],
+                'state': 'disconnected'
+            }
+
+        # Update device info
+        devices[device_id]['info'].update({
+            'device_name': data.get('device_name', devices[device_id]['info'].get('device_name', 'Unknown')),
+            'local_ip': data.get('local_ip', devices[device_id]['info'].get('local_ip', 'Unknown')),
+            'rssi': data.get('rssi', devices[device_id]['info'].get('rssi', None))
+        })
+
+        # Get location from IP
+        location = await get_gps_from_ip(ip_address)
+        
+        if location:
+            devices[device_id]['locations'].append(location)
+            if len(devices[device_id]['locations']) > 10:
+                devices[device_id]['locations'].pop(0)
+            
+            # Update global gps_coords for PDF reporting
+            gps_coords['latitude'] = location['latitude']
+            gps_coords['longitude'] = location['longitude']
+            
+            # Notify all connected clients
+            await notify_clients(device_id)
+            
+            return web.json_response({
+                'status': 'success',
+                'location': location
+            })
+        else:
+            return web.json_response({
+                'status': 'error',
+                'message': 'Could not determine location'
+            }, status=400)
+            
+    except Exception as e:
+        logging.error(f"Location handler error: {str(e)}")
+        return web.json_response({'error': 'Internal server error'}, status=500)
+
+async def notify_clients(device_id):
+    """Notify all connected clients about device update"""
+    for ws in devices.get(device_id, {}).get('websockets', []):
+        try:
+            await ws.send_json({
+                'device_id': device_id,
+                'location': devices[device_id]['locations'][-1],
+                'info': devices[device_id]['info'],
+                'state': devices[device_id]['state']
+            })
+        except:
+            pass
+
+async def websocket_handler(request):
+    """Handle WebSocket connections for real-time updates"""
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+    
+    device_id = request.query.get('device_id')
+    if not device_id:
+        await ws.close()
+        return ws
+
+    # Register WebSocket
+    if device_id not in devices:
+        devices[device_id] = {'websockets': [], 'locations': [], 'info': {}, 'state': 'disconnected'}
+    devices[device_id]['websockets'].append(ws)
+    
+    # Send current data if available
+    if 'locations' in devices[device_id] and devices[device_id]['locations']:
+        await ws.send_json({
+            'device_id': device_id,
+            'location': devices[device_id]['locations'][-1],
+            'info': devices[device_id]['info'],
+            'state': devices[device_id]['state']
+        })
+
+    # Keep connection alive
+    async for msg in ws:
+        if msg.type == WSMsgType.ERROR:
+            logging.error('WebSocket connection closed with exception: %s' % ws.exception())
+
+    # Unregister WebSocket
+    devices[device_id]['websockets'].remove(ws)
+    return ws
+
+async def handle_devices(request):
+    """List all registered devices"""
+    return web.json_response({
+        'devices': {
+            did: {
+                'last_seen': dev['locations'][-1]['timestamp'] if dev.get('locations') else None,
+                'info': dev.get('info', {}),
+                'state': dev.get('state', 'disconnected')
+            } for did, dev in devices.items()
+        }
+    })
+
 async def handle_data(request):
     global data, history, device_state, data_received, session_data, gps_coords
     
@@ -830,7 +1074,17 @@ async def handle_data(request):
         try:
             post_data = await request.json()
             status = post_data.get("status")
+            device_id = post_data.get('device_id', 'default')
             logging.debug(f"Received POST data: {post_data}")
+
+            # Initialize device if not exists
+            if device_id not in devices:
+                devices[device_id] = {
+                    'info': {},
+                    'locations': [],
+                    'websockets': [],
+                    'state': 'disconnected'
+                }
 
             if status == "data":
                 required_fields = ['temperature', 'humidity', 'speed', 'remaining']
@@ -847,11 +1101,12 @@ async def handle_data(request):
                         coords = await get_gps_from_ip(public_ip)
                         if coords:
                             gps_coords = coords
+                            devices[device_id]['locations'].append(coords)
                             logging.info(f"GPS Coordinates fetched: {gps_coords}")
 
                     data_received = True
                     device_state = "running"
-                    logging.info(f"State transitioned to: {device_state}")
+                    devices[device_id]['state'] = device_state
                     
                     data.update({field: post_data[field] for field in required_fields})
                     
@@ -869,6 +1124,7 @@ async def handle_data(request):
                     history["timestamps"].append(timestamp)
                     history["timestamps"] = history["timestamps"][-MAX_HISTORY:]
                     
+                    await notify_clients(device_id)
                     logging.info(f"Received valid sensor data: {post_data}")
                     return web.json_response({"status": "success", "state": device_state})
                 
@@ -878,6 +1134,7 @@ async def handle_data(request):
             elif status == "arduino_ready":
                 if device_state == "disconnected":
                     device_state = "ready"
+                    devices[device_id]['state'] = device_state
                     logging.info(f"State transitioned to: {device_state}")
                 return web.json_response({"status": "ready", "state": device_state})
             
@@ -895,11 +1152,13 @@ async def handle_data(request):
             
             elif status == "start":
                 device_state = "running"
+                devices[device_id]['state'] = device_state
                 logging.info(f"State transitioned to: {device_state}")
                 return web.json_response({"status": "running", "state": device_state})
             
             elif status == "stopped":
                 device_state = "stopped"
+                devices[device_id]['state'] = device_state
                 logging.info(f"State transitioned to: {device_state}")
                 return web.json_response({"status": "stopped", "state": device_state})
                 
@@ -936,6 +1195,8 @@ async def handle_setup(request):
             return web.json_response({"error": f"Auth code must be between {VALID_AUTH_CODE_MIN} and {VALID_AUTH_CODE_MAX}"}, status=400)
             
         device_state = "waiting"
+        for dev in devices.values():
+            dev['state'] = device_state
         logging.info(f"Setup complete - Auth Code: {auth_code}, Runtime: {runtime}, State: {device_state}")
         return web.json_response({"status": "waiting", "state": device_state})
         
@@ -951,6 +1212,8 @@ async def handle_stop(request):
     
     try:
         device_state = "disconnected"
+        for dev in devices.values():
+            dev['state'] = device_state
         auth_code = None
         runtime = None
         data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
@@ -969,6 +1232,8 @@ async def handle_reset(request):
     
     try:
         device_state = "disconnected"
+        for dev in devices.values():
+            dev['state'] = device_state
         session_data = []
         auth_code = None
         runtime = None
@@ -999,6 +1264,7 @@ async def handle_pdf_download(request):
         logging.error(f"Error serving PDF: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
+
 async def handle_root(request):
     return web.Response(text=HTML_CONTENT, content_type='text/html')
 
@@ -1010,6 +1276,9 @@ async def init_app():
     app.router.add_post('/stop', handle_stop)
     app.router.add_post('/reset', handle_reset)
     app.router.add_get('/download_pdf', handle_pdf_download)
+    app.router.add_post('/location', handle_location)
+    app.router.add_get('/ws', websocket_handler)
+    app.router.add_get('/devices', handle_devices)
     return app
 
 async def main():
