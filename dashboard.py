@@ -1236,7 +1236,7 @@ async def handle_stop(request):
     global device_state, session_data, auth_code, runtime, data, history, data_received, gps_coords
     
     try:
-        Wdevice_state = "disconnected"
+        device_state = "disconnected"
         auth_code = None
         runtime = None
         data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
