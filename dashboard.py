@@ -20,7 +20,6 @@ VALID_AUTH_CODE_MIN = 100
 VALID_AUTH_CODE_MAX = 999
 GOOGLE_API_KEY = "AIzaSyDpCPfntL6CEXPoOVPf2RmfmCjfV7rfano"  # Replace with your Google API key
 
-# Enhanced logging configuration
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -39,8 +38,408 @@ auth_code = None
 runtime = None
 gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": None}
 
+HTML_CONTENT = '''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aerospin Control Center</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+    <script src="https://maps.googleapis.com/maps/api/js?key=''' + GOOGLE_API_KEY + '''&libraries=places"></script>
+    <style>
+        body { font-family: 'Roboto', sans-serif; background-color: #f3f4f6; padding: 20px; }
+        .dashboard { background: #fff; padding: 20px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .header h1 { font-size: 24px; font-weight: 500; color: #1f2937; }
+        .status-badge { padding: 5px 10px; border-radius: 15px; font-size: 14px; background: #e5e7eb; color: #6b7280; }
+        .status-badge.active { background: #10b981; color: #fff; }
+        .metric-card { background: #fff; padding: 15px; border-radius: 8px; margin-bottom: 20px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .metric-title { font-size: 16px; color: #6b7280; margin-bottom: 10px; }
+        .metric-value { font-size: 28px; font-weight: 500; color: #1f2937; }
+        .metric-unit { font-size: 16px; color: #9ca3af; }
+        .chart-container { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); height: 250px; }
+        #map { height: 100%; width: 100%; border-radius: 8px; }
+        .control-card { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    </style>
+</head>
+<body>
+    <div class="container" id="dashboard">
+        <div class="dashboard">
+            <div class="header">
+                <h1><i class="ri-dashboard-3-line"></i> Aerospin Control Center</h1>
+                <div id="systemStatus" class="status-badge"><i class="ri-focus-3-line"></i> Disconnected</div>
+            </div>
+            <div class="row">
+                <div class="col-md-3">
+                    <div class="metric-card temperature">
+                        <div class="metric-title"><i class="ri-temp-hot-line"></i> Temperature</div>
+                        <div id="temperature" class="metric-value">0<span class="metric-unit">°C</span></div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="metric-card humidity">
+                        <div class="metric-title"><i class="ri-drop-line"></i> Humidity</div>
+                        <div id="humidity" class="metric-value">0<span class="metric-unit">%</span></div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="metric-card speed">
+                        <div class="metric-title"><i class="ri-speed-line"></i> Speed</div>
+                        <div id="speed" class="metric-value">0<span class="metric-unit">%</span></div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="metric-card remaining">
+                        <div class="metric-title"><i class="ri-time-line"></i> Time Remaining</div>
+                        <div id="remaining" class="metric-value">0<span class="metric-unit">s</span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-3"><div class="chart-container"><canvas id="tempChart"></canvas></div></div>
+                <div class="col-md-3"><div class="chart-container"><canvas id="humidChart"></canvas></div></div>
+                <div class="col-md-3"><div class="chart-container"><canvas id="speedChart"></canvas></div></div>
+                <div class="col-md-3"><div class="chart-container"><canvas id="remainingChart"></canvas></div></div>
+            </div>
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="control-card">
+                        <h4 class="mb-3">Control Panel</h4>
+                        <div class="mb-3">
+                            <label for="authCode" class="form-label">Auth Code (100-999)</label>
+                            <input type="number" id="authCode" min="100" max="999" class="form-control" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="runtime" class="form-label">Runtime (seconds)</label>
+                            <input type="number" id="runtime" min="1" class="form-control" required>
+                        </div>
+                        <button id="submitSetup" class="btn btn-primary w-100">Configure System</button>
+                        <button id="stopButton" class="btn btn-danger w-100 mt-2" style="display: none;">
+                            <i class="ri-stop-circle-line"></i> Stop System
+                        </button>
+                        <button id="downloadPdf" class="btn btn-primary w-100 mt-2" style="display: none;">Download Report</button>
+                        <button id="startNewSession" class="btn btn-success w-100 mt-2" style="display: none;">
+                            <i class="ri-restart-line"></i> New Session
+                        </button>
+                    </div>
+                </div>
+                <div class="col-md-8">
+                    <div class="chart-container" style="height: 300px;">
+                        <div id="map"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        let tempChart, humidChart, speedChart, remainingChart;
+        let map, marker;
+        let previousState = "disconnected";
+
+        function initCharts() {
+            const commonOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { 
+                    x: { 
+                        display: true, 
+                        ticks: { 
+                            maxRotation: 45, 
+                            minRotation: 45,
+                            color: '#9ca3af'
+                        },
+                        grid: { color: 'rgba(156, 163, 175, 0.1)' }
+                    }, 
+                    y: { 
+                        beginAtZero: false,
+                        ticks: { color: '#9ca3af' },
+                        grid: { color: 'rgba(156, 163, 175, 0.1)' }
+                    } 
+                },
+                plugins: { 
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: '#1f2937',
+                        titleColor: '#f9fafb',
+                        bodyColor: '#f9fafb',
+                        borderColor: '#4cc9f0',
+                        borderWidth: 1
+                    }
+                }
+            };
+            
+            tempChart = new Chart(document.getElementById('tempChart').getContext('2d'), {
+                type: 'line',
+                data: { labels: [], datasets: [{ data: [], borderColor: '#f72585', borderWidth: 2, pointBackgroundColor: '#f72585', pointRadius: 3, pointHoverRadius: 5, tension: 0.1, fill: false }] },
+                options: commonOptions
+            });
+            
+            humidChart = new Chart(document.getElementById('humidChart').getContext('2d'), {
+                type: 'line',
+                data: { labels: [], datasets: [{ data: [], borderColor: '#4cc9f0', borderWidth: 2, pointBackgroundColor: '#4cc9f0', pointRadius: 3, pointHoverRadius: 5, tension: 0.1, fill: false }] },
+                options: commonOptions
+            });
+            
+            speedChart = new Chart(document.getElementById('speedChart').getContext('2d'), {
+                type: 'line',
+                data: { labels: [], datasets: [{ data: [], borderColor: '#4361ee', borderWidth: 2, pointBackgroundColor: '#4361ee', pointRadius: 3, pointHoverRadius: 5, tension: 0.1, fill: false }] },
+                options: commonOptions
+            });
+            
+            remainingChart = new Chart(document.getElementById('remainingChart').getContext('2d'), {
+                type: 'line',
+                data: { labels: [], datasets: [{ data: [], borderColor: '#9b59b6', borderWidth: 2, pointBackgroundColor: '#9b59b6', pointRadius: 3, pointHoverRadius: 5, tension: 0.1, fill: false }] },
+                options: commonOptions
+            });
+        }
+
+        function updateCharts(data) {
+            const maxPoints = 20;
+            const timestamps = data.history.timestamps.slice(-maxPoints);
+            
+            tempChart.data.labels = timestamps;
+            tempChart.data.datasets[0].data = data.history.temperature.slice(-maxPoints);
+            tempChart.update();
+            
+            humidChart.data.labels = timestamps;
+            humidChart.data.datasets[0].data = data.history.humidity.slice(-maxPoints);
+            humidChart.update();
+            
+            speedChart.data.labels = timestamps;
+            speedChart.data.datasets[0].data = data.history.speed.slice(-maxPoints);
+            speedChart.update();
+            
+            remainingChart.data.labels = timestamps;
+            remainingChart.data.datasets[0].data = data.history.remaining.slice(-maxPoints);
+            remainingChart.update();
+        }
+
+        function resetCharts() {
+            tempChart.data.labels = [];
+            tempChart.data.datasets[0].data = [];
+            tempChart.update();
+            
+            humidChart.data.labels = [];
+            humidChart.data.datasets[0].data = [];
+            humidChart.update();
+            
+            speedChart.data.labels = [];
+            speedChart.data.datasets[0].data = [];
+            speedChart.update();
+            
+            remainingChart.data.labels = [];
+            remainingChart.data.datasets[0].data = [];
+            remainingChart.update();
+        }
+
+        function initMap() {
+            map = new google.maps.Map(document.getElementById('map'), {
+                center: { lat: 20, lng: 54 },
+                zoom: 2,
+                mapTypeId: 'roadmap',
+                styles: [
+                    {
+                        "featureType": "all",
+                        "elementType": "all",
+                        "stylers": [
+                            { "saturation": -20 },
+                            { "lightness": 10 }
+                        ]
+                    }
+                ]
+            });
+        }
+
+        function updateMap(latitude, longitude) {
+            if (latitude && longitude) {
+                console.log(`Updating map to Arduino location: Lat ${latitude}, Lon ${longitude}`);
+                const position = { lat: latitude, lng: longitude };
+                
+                if (!marker) {
+                    marker = new google.maps.Marker({
+                        position: position,
+                        map: map,
+                        icon: {
+                            path: google.maps.SymbolPath.CIRCLE,
+                            scale: 10,
+                            fillColor: '#f59e0b',
+                            fillOpacity: 0.8,
+                            strokeWeight: 2,
+                            strokeColor: '#136aec'
+                        },
+                        title: "Arduino Device Location"
+                    });
+                } else {
+                    marker.setPosition(position);
+                }
+
+                map.setCenter(position);
+                map.setZoom(13);
+            }
+        }
+
+        function updateSystemStatus(status, isActive = false) {
+            const statusElement = document.getElementById('systemStatus');
+            statusElement.innerHTML = isActive ? 
+                '<i class="ri-checkbox-circle-line"></i> ' + status : 
+                '<i class="ri-focus-3-line"></i> ' + status;
+            statusElement.className = isActive ? 'status-badge active' : 'status-badge';
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            initCharts();
+            initMap();
+            document.getElementById('submitSetup').addEventListener('click', submitSetup);
+            document.getElementById('stopButton').addEventListener('click', stopSystem);
+            document.getElementById('downloadPdf').addEventListener('click', downloadPdf);
+            document.getElementById('startNewSession').addEventListener('click', startNewSession);
+            setInterval(fetchData, 1000); // Poll server for Arduino data
+        });
+
+        async function submitSetup() {
+            const authCode = parseInt(document.getElementById('authCode').value);
+            const runtime = parseInt(document.getElementById('runtime').value);
+            
+            if (isNaN(authCode) || authCode < 100 || authCode > 999) {
+                alert("Auth code must be between 100 and 999.");
+                return;
+            }
+            
+            if (isNaN(runtime) || runtime < 1) {
+                alert("Runtime must be a positive number.");
+                return;
+            }
+            
+            try {
+                const response = await fetch('/setup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ authCode: authCode, runtime: runtime })
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'waiting') {
+                    updateSystemStatus('Waiting');
+                    document.getElementById('submitSetup').disabled = true;
+                    fetchData();
+                } else {
+                    alert("Setup failed: " + result.error);
+                }
+            } catch (error) {
+                console.error('Error submitting setup:', error);
+                alert('Failed to submit setup.');
+            }
+        }
+
+        async function stopSystem() {
+            try {
+                const response = await fetch('/stop', {
+                    method: 'POST'
+                });
+                if (response.ok) {
+                    window.location.reload();
+                }
+            } catch (error) {
+                console.error('Error stopping system:', error);
+                alert('Failed to stop system.');
+            }
+        }
+
+        async function downloadPdf() {
+            try {
+                const response = await fetch('/download_pdf');
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `aerospin_report_${new Date().toISOString().replace(/[:.]/g, '-')}.pdf`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    window.URL.revokeObjectURL(url);
+                } else {
+                    alert('No report available.');
+                }
+            } catch (error) {
+                console.error('Error downloading PDF:', error);
+                alert('Failed to download report.');
+            }
+        }
+
+        async function startNewSession() {
+            try {
+                const response = await fetch('/reset', {
+                    method: 'POST'
+                });
+                if (response.ok) {
+                    document.getElementById('submitSetup').disabled = false;
+                    fetchData();
+                } else {
+                    alert('Failed to start new session.');
+                }
+            } catch (error) {
+                console.error('Error starting new session:', error);
+                alert('Failed to start new session.');
+            }
+        }
+
+        async function fetchData() {
+            try {
+                const response = await fetch('/data');
+                const data = await response.json();
+                console.log("Fetched data:", data);
+                const currentState = data.state;
+
+                updateSystemStatus(currentState.charAt(0).toUpperCase() + currentState.slice(1), currentState === 'running');
+                
+                if (data.data_received) {
+                    document.getElementById('temperature').innerHTML = `${data.temperature.toFixed(1)}<span class="metric-unit">°C</span>`;
+                    document.getElementById('humidity').innerHTML = `${data.humidity.toFixed(1)}<span class="metric-unit">%</span>`;
+                    document.getElementById('speed').innerHTML = `${data.speed}<span class="metric-unit">%</span>`;
+                    document.getElementById('remaining').innerHTML = `${data.remaining}<span class="metric-unit">s</span>`;
+                    updateCharts(data);
+
+                    if (data.gps?.latitude && data.gps?.longitude) {
+                        console.log(`Arduino GPS data received: Lat ${data.gps.latitude}, Lon ${data.gps.longitude}`);
+                        updateMap(data.gps.latitude, data.gps.longitude);
+                    }
+                }
+
+                if (currentState === 'disconnected') {
+                    document.getElementById('temperature').innerHTML = `0<span class="metric-unit">°C</span>`;
+                    document.getElementById('humidity').innerHTML = `0<span class="metric-unit">%</span>`;
+                    document.getElementById('speed').innerHTML = `0<span class="metric-unit">%</span>`;
+                    document.getElementById('remaining').innerHTML = `0<span class="metric-unit">s</span>`;
+                    resetCharts();
+                }
+
+                document.getElementById('stopButton').style.display = 
+                    (currentState === 'running' || currentState === 'waiting' || currentState === 'ready') ? 'block' : 'none';
+                document.getElementById('downloadPdf').style.display = 
+                    (currentState === 'stopped' && data.history.timestamps.length > 0) ? 'block' : 'none';
+                document.getElementById('startNewSession').style.display = 
+                    (currentState === 'stopped' && data.history.timestamps.length > 0) ? 'block' : 'none';
+
+                previousState = currentState;
+
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                updateSystemStatus('Connection Error');
+            }
+        }
+    </script>
+</body>
+</html>
+'''
+
 async def get_gps_from_ip(ip_address):
-    """Improved geolocation with multiple fallbacks"""
+    """IP-based geolocation for the Arduino device"""
     logging.debug(f"Attempting IP geolocation for: {ip_address}")
     try:
         # Try Google Geolocation API first
@@ -92,7 +491,7 @@ def generate_pdf(session_data):
     elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
     if gps_coords["latitude"] and gps_coords["longitude"]:
         elements.append(Paragraph(
-            f"Location: Lat {gps_coords['latitude']:.6f}, Lon {gps_coords['longitude']:.6f} "
+            f"Device Location: Lat {gps_coords['latitude']:.6f}, Lon {gps_coords['longitude']:.6f} "
             f"(Source: {gps_coords['source']}, Accuracy: {gps_coords['accuracy']}m)",
             styles['Normal']
         ))
@@ -205,853 +604,6 @@ def generate_pdf(session_data):
     logging.info(f"PDF generated: {filename}")
     return filename
 
-HTML_CONTENT = '''
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aerospin Control Center</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
-    <script src="https://maps.googleapis.com/maps/api/js?key=''' + GOOGLE_API_KEY + '''&libraries=places"></script>
-    <style>
-        :root {
-            --primary: #4361ee;
-            --secondary: #3a0ca3;
-            --accent: #4cc9f0;
-            --warning: #f72585;
-            --success: #4ade80;
-            --background: #111827;
-            --card-bg: #1f2937;
-            --text: #f9fafb;
-            --text-secondary: #9ca3af;
-            --border: #374151;
-        }
-        body {
-            background: var(--background);
-            color: var(--text);
-            font-family: 'Roboto', sans-serif;
-            margin: 0;
-            padding: 30px;
-            line-height: 1.6;
-        }
-        .container { 
-            max-width: 1300px; 
-            padding: 20px; 
-        }
-        .dashboard {
-            border-radius: 16px;
-            padding: 24px;
-            background: linear-gradient(135deg, 
-                rgba(31, 41, 55, 0.95), 
-                rgba(17, 24, 39, 0.98));
-            border: 1px solid rgba(55, 65, 81, 0.5);
-            box-shadow: 
-                0 15px 35px rgba(0, 0, 0, 0.3), 
-                0 5px 15px rgba(0, 0, 0, 0.2);
-            transition: all 0.3s ease;
-        }
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 24px;
-            padding-bottom: 16px;
-            border-bottom: 1px solid var(--border);
-        }
-        .header h1 {
-            font-size: 24px;
-            font-weight: 600;
-            margin: 0;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        .header h1 i { 
-            color: var(--accent); 
-            transition: transform 0.3s ease;
-        }
-        .header h1 i:hover {
-            transform: rotate(15deg) scale(1.1);
-        }
-        .status-badge {
-            background: rgba(67, 97, 238, 0.15);
-            color: var(--accent);
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            transition: all 0.3s ease;
-        }
-        .status-badge:hover {
-            transform: scale(1.05);
-            background: rgba(67, 97, 238, 0.25);
-        }
-        .status-badge.active {
-            background: rgba(74, 222, 128, 0.15);
-            color: var(--success);
-        }
-        .metric-card {
-            background: var(--card-bg);
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 24px;
-            border: 1px solid var(--border);
-            transition: 
-                transform 0.4s cubic-bezier(0.25, 0.1, 0.25, 1),
-                box-shadow 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
-            position: relative;
-            overflow: hidden;
-        }
-        .metric-card::before {
-            content: '';
-            position: absolute;
-            top: -50%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: linear-gradient(
-                45deg, 
-                transparent, 
-                rgba(255,255,255,0.05), 
-                transparent
-            );
-            transform: rotate(-45deg);
-            opacity: 0;
-            transition: opacity 0.3s ease;
-        }
-        .metric-card:hover::before {
-            opacity: 1;
-        }
-        .metric-card:hover {
-            transform: translateY(-8px) scale(1.02);
-            box-shadow: 
-                0 15px 30px rgba(0, 0, 0, 0.3), 
-                0 0 20px rgba(67, 97, 238, 0.2);
-        }
-        .metric-title {
-            font-size: 13px;
-            color: var(--text-secondary);
-            margin-bottom: 12px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-weight: 500;
-            letter-spacing: 0.5px;
-            text-transform: uppercase;
-        }
-        .metric-value {
-            font-size: 28px;
-            font-weight: 700;
-            margin-bottom: 4px;
-            letter-spacing: -1px;
-        }
-        .metric-unit {
-            font-size: 16px;
-            color: var(--text-secondary);
-            margin-left: 5px;
-        }
-        .chart-container {
-            position: relative;
-            height: 220px;
-            margin-bottom: 24px;
-            background: rgba(31, 41, 55, 0.6);
-            border-radius: 12px;
-            padding: 16px;
-            border: 1px solid var(--border);
-            backdrop-filter: blur(10px);
-            transition: 
-                transform 0.4s cubic-bezier(0.25, 0.1, 0.25, 1),
-                box-shadow 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
-        }
-        .chart-container:hover {
-            transform: translateY(-8px) scale(1.02);
-            box-shadow: 
-                0 15px 30px rgba(0, 0, 0, 0.3), 
-                0 0 20px rgba(67, 97, 238, 0.2);
-        }
-        .control-card {
-            background: var(--card-bg);
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 24px;
-            border: 1px solid var(--border);
-            transition: all 0.3s ease;
-        }
-        .control-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 
-                0 10px 20px rgba(0, 0, 0, 0.2);
-        }
-        .btn-primary { 
-            background-color: var(--primary); 
-            border-color: var(--primary); 
-            border-radius: 25px;
-            padding: 10px 20px;
-            text-transform: uppercase;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-            transition: 
-                background-color 0.3s ease,
-                transform 0.3s ease,
-                box-shadow 0.3s ease;
-        }
-        .btn-primary:hover {
-            background-color: var(--secondary);
-            border-color: var(--secondary);
-            transform: translateY(-3px);
-            box-shadow: 0 7px 14px rgba(0, 0, 0, 0.25);
-        }
-        .btn-danger { 
-            background-color: var(--warning); 
-            border-color: var(--warning); 
-            border-radius: 25px;
-            padding: 10px 20px;
-            text-transform: uppercase;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-            transition: 
-                background-color 0.3s ease,
-                transform 0.3s ease,
-                box-shadow 0.3s ease;
-        }
-        .btn-danger:hover {
-            background-color: #d3165e;
-            border-color: #d3165e;
-            transform: translateY(-3px);
-            box-shadow: 0 7px 14px rgba(0, 0, 0, 0.25);
-        }
-        .btn-success { 
-            background-color: var(--success); 
-            border-color: var(--success); 
-            border-radius: 25px;
-            padding: 10px 20px;
-            text-transform: uppercase;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-            transition: 
-                background-color 0.3s ease,
-                transform 0.3s ease,
-                box-shadow 0.3s ease;
-        }
-        .btn-success:hover {
-            background-color: #38b260;
-            border-color: #38b260;
-            transform: translateY(-3px);
-            box-shadow: 0 7px 14px rgba(0, 0, 0, 0.25);
-        }
-        .form-control {
-            background-color: var(--background);
-            color: var(--text);
-            border-color: var(--border);
-            transition: all 0.3s ease;
-        }
-        .form-control:focus {
-            background-color: var(--background);
-            color: var(--text);
-            border-color: var(--primary);
-            outline: none;
-            box-shadow: 
-                0 0 0 3px rgba(67, 97, 238, 0.3),
-                0 0 0 1px rgba(67, 97, 238, 0.8);
-        }
-        #map { 
-            height: 100%; 
-            width: 100%; 
-            border-radius: 12px;
-            border: 1px solid var(--border);
-        }
-        .location-marker {
-            position: relative;
-            width: 20px;
-            height: 20px;
-        }
-        .pulse-marker {
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background: #136aec;
-            position: absolute;
-            box-shadow: 0 0 0 0 rgba(19, 106, 236, 0.7);
-            animation: pulse 1.5s infinite;
-        }
-        .location-marker.precise .pulse-marker {
-            background: #4ade80;
-            animation: pulse 1.5s infinite, colorPulse 3s infinite;
-        }
-        .location-marker.approximate .pulse-marker {
-            background: #f59e0b;
-        }
-        .accuracy-text {
-            position: absolute;
-            white-space: nowrap;
-            font-size: 12px;
-            color: white;
-            background: rgba(0,0,0,0.7);
-            padding: 2px 6px;
-            border-radius: 10px;
-            top: 25px;
-            left: 50%;
-            transform: translateX(-50%);
-        }
-        @keyframes pulse {
-            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(19, 106, 236, 0.7); }
-            70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(19, 106, 236, 0); }
-            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(19, 106, 236, 0); }
-        }
-        @keyframes colorPulse {
-            0%, 100% { background: #4ade80; }
-            50% { background: #22d3ee; }
-        }
-        @media (max-width: 768px) {
-            .metric-card, .chart-container {
-                margin-bottom: 15px;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="container" id="dashboard">
-        <div class="dashboard">
-            <div class="header">
-                <h1><i class="ri-dashboard-3-line"></i> Aerospin Control Center</h1>
-                <div id="systemStatus" class="status-badge"><i class="ri-focus-3-line"></i> Disconnected</div>
-            </div>
-            <div class="row">
-                <div class="col-md-3">
-                    <div class="metric-card temperature">
-                        <div class="metric-title"><i class="ri-temp-hot-line"></i> Temperature</div>
-                        <div id="temperature" class="metric-value">0<span class="metric-unit">°C</span></div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="metric-card humidity">
-                        <div class="metric-title"><i class="ri-drop-line"></i> Humidity</div>
-                        <div id="humidity" class="metric-value">0<span class="metric-unit">%</span></div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="metric-card speed">
-                        <div class="metric-title"><i class="ri-speed-line"></i> Speed</div>
-                        <div id="speed" class="metric-value">0<span class="metric-unit">%</span></div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="metric-card remaining">
-                        <div class="metric-title"><i class="ri-time-line"></i> Time Remaining</div>
-                        <div id="remaining" class="metric-value">0<span class="metric-unit">s</span></div>
-                    </div>
-                </div>
-            </div>
-            <div class="row">
-                <div class="col-md-3"><div class="chart-container"><canvas id="tempChart"></canvas></div></div>
-                <div class="col-md-3"><div class="chart-container"><canvas id="humidChart"></canvas></div></div>
-                <div class="col-md-3"><div class="chart-container"><canvas id="speedChart"></canvas></div></div>
-                <div class="col-md-3"><div class="chart-container"><canvas id="remainingChart"></canvas></div></div>
-            </div>
-            <div class="row">
-                <div class="col-md-4">
-                    <div class="control-card">
-                        <h4 class="mb-3">Control Panel</h4>
-                        <div class="mb-3">
-                            <label for="authCode" class="form-label">Auth Code (100-999)</label>
-                            <input type="number" id="authCode" min="100" max="999" class="form-control" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="runtime" class="form-label">Runtime (seconds)</label>
-                            <input type="number" id="runtime" min="1" class="form-control" required>
-                        </div>
-                        <button id="submitSetup" class="btn btn-primary w-100">Configure System</button>
-                        <button id="stopButton" class="btn btn-danger w-100 mt-2" style="display: none;">
-                            <i class="ri-stop-circle-line"></i> Stop System
-                        </button>
-                        <button id="downloadPdf" class="btn btn-primary w-100 mt-2" style="display: none;">Download Report</button>
-                        <button id="startNewSession" class="btn btn-success w-100 mt-2" style="display: none;">
-                            <i class="ri-restart-line"></i> New Session
-                        </button>
-                    </div>
-                </div>
-                <div class="col-md-8">
-                    <div class="chart-container" style="height: 300px;">
-                        <div id="map"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    <script>
-        let tempChart, humidChart, speedChart, remainingChart;
-        let map, marker;
-        let userLocation = null;
-        let previousState = "disconnected";
-
-        function initCharts() {
-            const commonOptions = {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: { 
-                    x: { 
-                        display: true, 
-                        ticks: { 
-                            maxRotation: 45, 
-                            minRotation: 45,
-                            color: '#9ca3af'
-                        },
-                        grid: {
-                            color: 'rgba(156, 163, 175, 0.1)'
-                        }
-                    }, 
-                    y: { 
-                        beginAtZero: false,
-                        ticks: {
-                            color: '#9ca3af'
-                        },
-                        grid: {
-                            color: 'rgba(156, 163, 175, 0.1)'
-                        }
-                    } 
-                },
-                plugins: { 
-                    legend: { display: false },
-                    tooltip: {
-                        backgroundColor: '#1f2937',
-                        titleColor: '#f9fafb',
-                        bodyColor: '#f9fafb',
-                        borderColor: '#4cc9f0',
-                        borderWidth: 1
-                    }
-                }
-            };
-            
-            tempChart = new Chart(document.getElementById('tempChart').getContext('2d'), {
-                type: 'line',
-                data: { 
-                    labels: [], 
-                    datasets: [{ 
-                        data: [], 
-                        borderColor: '#f72585', 
-                        borderWidth: 2,
-                        pointBackgroundColor: '#f72585',
-                        pointRadius: 3,
-                        pointHoverRadius: 5,
-                        tension: 0.1,
-                        fill: false 
-                    }] 
-                },
-                options: commonOptions
-            });
-            
-            humidChart = new Chart(document.getElementById('humidChart').getContext('2d'), {
-                type: 'line',
-                data: { 
-                    labels: [], 
-                    datasets: [{ 
-                        data: [], 
-                        borderColor: '#4cc9f0', 
-                        borderWidth: 2,
-                        pointBackgroundColor: '#4cc9f0',
-                        pointRadius: 3,
-                        pointHoverRadius: 5,
-                        tension: 0.1,
-                        fill: false 
-                    }] 
-                },
-                options: commonOptions
-            });
-            
-            speedChart = new Chart(document.getElementById('speedChart').getContext('2d'), {
-                type: 'line',
-                data: { 
-                    labels: [], 
-                    datasets: [{ 
-                        data: [], 
-                        borderColor: '#4361ee', 
-                        borderWidth: 2,
-                        pointBackgroundColor: '#4361ee',
-                        pointRadius: 3,
-                        pointHoverRadius: 5,
-                        tension: 0.1,
-                        fill: false 
-                    }] 
-                },
-                options: commonOptions
-            });
-            
-            remainingChart = new Chart(document.getElementById('remainingChart').getContext('2d'), {
-                type: 'line',
-                data: { 
-                    labels: [], 
-                    datasets: [{ 
-                        data: [], 
-                        borderColor: '#9b59b6', 
-                        borderWidth: 2,
-                        pointBackgroundColor: '#9b59b6',
-                        pointRadius: 3,
-                        pointHoverRadius: 5,
-                        tension: 0.1,
-                        fill: false 
-                    }] 
-                },
-                options: commonOptions
-            });
-        }
-
-        function updateCharts(data) {
-            const maxPoints = 20;
-            const timestamps = data.history.timestamps.slice(-maxPoints);
-            
-            tempChart.data.labels = timestamps;
-            tempChart.data.datasets[0].data = data.history.temperature.slice(-maxPoints);
-            tempChart.update();
-            
-            humidChart.data.labels = timestamps;
-            humidChart.data.datasets[0].data = data.history.humidity.slice(-maxPoints);
-            humidChart.update();
-            
-            speedChart.data.labels = timestamps;
-            speedChart.data.datasets[0].data = data.history.speed.slice(-maxPoints);
-            speedChart.update();
-            
-            remainingChart.data.labels = timestamps;
-            remainingChart.data.datasets[0].data = data.history.remaining.slice(-maxPoints);
-            remainingChart.update();
-        }
-
-        function resetCharts() {
-            tempChart.data.labels = [];
-            tempChart.data.datasets[0].data = [];
-            tempChart.update();
-            
-            humidChart.data.labels = [];
-            humidChart.data.datasets[0].data = [];
-            humidChart.update();
-            
-            speedChart.data.labels = [];
-            speedChart.data.datasets[0].data = [];
-            speedChart.update();
-            
-            remainingChart.data.labels = [];
-            remainingChart.data.datasets[0].data = [];
-            remainingChart.update();
-        }
-
-        function initMap() {
-            map = new google.maps.Map(document.getElementById('map'), {
-                center: { lat: 20, lng: 54 },
-                zoom: 2,
-                mapTypeId: 'roadmap',
-                styles: [
-                    {
-                        "featureType": "all",
-                        "elementType": "all",
-                        "stylers": [
-                            { "saturation": -20 },
-                            { "lightness": 10 }
-                        ]
-                    }
-                ]
-            });
-            getPreciseLocation();
-        }
-
-        function getPreciseLocation() {
-            if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition(
-                    (position) => {
-                        userLocation = {
-                            latitude: position.coords.latitude,
-                            longitude: position.coords.longitude,
-                            accuracy: position.coords.accuracy,
-                            source: 'browser'
-                        };
-                        updateMap(userLocation.latitude, userLocation.longitude);
-                        updateLocationMarker(true);
-                    },
-                    (error) => {
-                        console.warn("Geolocation error:", error);
-                        updateLocationMarker(false);
-                    },
-                    {
-                        enableHighAccuracy: true,
-                        timeout: 10000,
-                        maximumAge: 0
-                    }
-                );
-            } else {
-                updateLocationMarker(false);
-            }
-        }
-
-        function updateMap(latitude, longitude) {
-            if (latitude && longitude) {
-                console.log(`Updating map to: Lat ${latitude}, Lon ${longitude}`);
-                
-                const position = { lat: latitude, lng: longitude };
-                
-                if (!marker) {
-                    marker = new google.maps.Marker({
-                        position: position,
-                        map: map,
-                        icon: {
-                            path: google.maps.SymbolPath.CIRCLE,
-                            scale: 10,
-                            fillColor: userLocation?.source === 'browser' ? '#4ade80' : '#f59e0b',
-                            fillOpacity: 0.8,
-                            strokeWeight: 2,
-                            strokeColor: '#136aec'
-                        }
-                    });
-                } else {
-                    marker.setPosition(position);
-                }
-
-                const zoom = userLocation?.accuracy ? 
-                    Math.max(10, Math.round(14 - Math.log2(userLocation.accuracy / 50))) : 
-                    13;
-                    
-                map.setCenter(position);
-                map.setZoom(zoom);
-
-                if (userLocation?.accuracy) {
-                    if (window.accuracyCircle) {
-                        window.accuracyCircle.setMap(null);
-                    }
-                    window.accuracyCircle = new google.maps.Circle({
-                        center: position,
-                        radius: userLocation.accuracy,
-                        map: map,
-                        fillColor: '#136aec',
-                        fillOpacity: 0.15,
-                        strokeColor: '#136aec',
-                        strokeOpacity: 0.8,
-                        strokeWeight: 1
-                    });
-                }
-            }
-        }
-
-        function updateLocationMarker(isPrecise) {
-            if (marker) {
-                marker.setIcon({
-                    path: google.maps.SymbolPath.CIRCLE,
-                    scale: 10,
-                    fillColor: isPrecise ? '#4ade80' : '#f59e0b',
-                    fillOpacity: 0.8,
-                    strokeWeight: 2,
-                    strokeColor: '#136aec'
-                });
-
-                if (!isPrecise) {
-                    const infoWindow = new google.maps.InfoWindow({
-                        content: "Location is approximate (based on IP address)"
-                    });
-                    infoWindow.open(map, marker);
-                }
-            }
-        }
-
-        function startLocationUpdates() {
-            setInterval(() => {
-                if (navigator.geolocation && previousState === 'running') {
-                    navigator.geolocation.getCurrentPosition(
-                        (position) => {
-                            userLocation = {
-                                latitude: position.coords.latitude,
-                                longitude: position.coords.longitude,
-                                accuracy: position.coords.accuracy,
-                                source: 'browser'
-                            };
-                            updateMap(userLocation.latitude, userLocation.longitude);
-                            updateLocationMarker(true);
-                            fetch('/data', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    status: 'data',
-                                    latitude: userLocation.latitude,
-                                    longitude: userLocation.longitude,
-                                    accuracy: userLocation.accuracy
-                                })
-                            });
-                        },
-                        (error) => console.warn("Geolocation error:", error),
-                        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-                    );
-                }
-            }, 30000); // Update every 30 seconds during run
-        }
-
-        function updateSystemStatus(status, isActive = false) {
-            const statusElement = document.getElementById('systemStatus');
-            statusElement.innerHTML = isActive ? 
-                '<i class="ri-checkbox-circle-line"></i> ' + status : 
-                '<i class="ri-focus-3-line"></i> ' + status;
-            statusElement.className = isActive ? 'status-badge active' : 'status-badge';
-        }
-
-        document.addEventListener('DOMContentLoaded', function() {
-            initCharts();
-            initMap();
-            startLocationUpdates();
-            document.getElementById('submitSetup').addEventListener('click', submitSetup);
-            document.getElementById('stopButton').addEventListener('click', stopSystem);
-            document.getElementById('downloadPdf').addEventListener('click', downloadPdf);
-            document.getElementById('startNewSession').addEventListener('click', startNewSession);
-            setInterval(fetchData, 1000);
-        });
-
-        async function submitSetup() {
-            const authCode = parseInt(document.getElementById('authCode').value);
-            const runtime = parseInt(document.getElementById('runtime').value);
-            
-            if (isNaN(authCode) || authCode < 100 || authCode > 999) {
-                alert("Auth code must be between 100 and 999.");
-                return;
-            }
-            
-            if (isNaN(runtime) || runtime < 1) {
-                alert("Runtime must be a positive number.");
-                return;
-            }
-            
-            try {
-                const response = await fetch('/setup', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ authCode: authCode, runtime: runtime })
-                });
-                
-                const result = await response.json();
-                
-                if (result.status === 'waiting') {
-                    updateSystemStatus('Waiting');
-                    document.getElementById('submitSetup').disabled = true;
-                    fetchData();
-                } else {
-                    alert("Setup failed: " + result.error);
-                }
-            } catch (error) {
-                console.error('Error submitting setup:', error);
-                alert('Failed to submit setup.');
-            }
-        }
-
-        async function stopSystem() {
-            try {
-                const response = await fetch('/stop', {
-                    method: 'POST'
-                });
-                if (response.ok) {
-                    window.location.reload();
-                }
-            } catch (error) {
-                console.error('Error stopping system:', error);
-                alert('Failed to stop system.');
-            }
-        }
-
-        async function downloadPdf() {
-            try {
-                const response = await fetch('/download_pdf');
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `aerospin_report_${new Date().toISOString().replace(/[:.]/g, '-')}.pdf`;
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
-                    window.URL.revokeObjectURL(url);
-                } else {
-                    alert('No report available.');
-                }
-            } catch (error) {
-                console.error('Error downloading PDF:', error);
-                alert('Failed to download report.');
-            }
-        }
-
-        async function startNewSession() {
-            try {
-                const response = await fetch('/reset', {
-                    method: 'POST'
-                });
-                if (response.ok) {
-                    document.getElementById('submitSetup').disabled = false;
-                    fetchData();
-                } else {
-                    alert('Failed to start new session.');
-                }
-            } catch (error) {
-                console.error('Error starting new session:', error);
-                alert('Failed to start new session.');
-            }
-        }
-
-        async function fetchData() {
-            try {
-                const response = await fetch('/data');
-                const data = await response.json();
-                console.log("Fetched data:", data);
-                const currentState = data.state;
-
-                updateSystemStatus(currentState.charAt(0).toUpperCase() + currentState.slice(1), currentState === 'running');
-                
-                if (data.data_received) {
-                    document.getElementById('temperature').innerHTML = `${data.temperature.toFixed(1)}<span class="metric-unit">°C</span>`;
-                    document.getElementById('humidity').innerHTML = `${data.humidity.toFixed(1)}<span class="metric-unit">%</span>`;
-                    document.getElementById('speed').innerHTML = `${data.speed}<span class="metric-unit">%</span>`;
-                    document.getElementById('remaining').innerHTML = `${data.remaining}<span class="metric-unit">s</span>`;
-                    updateCharts(data);
-
-                    if (data.gps?.latitude && data.gps?.longitude) {
-                        console.log(`GPS data received: Lat ${data.gps.latitude}, Lon ${data.gps.longitude}`);
-                        userLocation = {
-                            latitude: data.gps.latitude,
-                            longitude: data.gps.longitude,
-                            accuracy: data.gps.accuracy || 50000,
-                            source: data.gps.source || 'ip'
-                        };
-                        updateMap(userLocation.latitude, userLocation.longitude);
-                        updateLocationMarker(data.gps.source === 'browser_geolocation');
-                    } else {
-                        console.log("No GPS data in this update");
-                    }
-                }
-
-                if (currentState === 'disconnected') {
-                    document.getElementById('temperature').innerHTML = `0<span class="metric-unit">°C</span>`;
-                    document.getElementById('humidity').innerHTML = `0<span class="metric-unit">%</span>`;
-                    document.getElementById('speed').innerHTML = `0<span class="metric-unit">%</span>`;
-                    document.getElementById('remaining').innerHTML = `0<span class="metric-unit">s</span>`;
-                    resetCharts();
-                }
-
-                document.getElementById('stopButton').style.display = 
-                    (currentState === 'running' || currentState === 'waiting' || currentState === 'ready') ? 'block' : 'none';
-                document.getElementById('downloadPdf').style.display = 
-                    (currentState === 'stopped' && data.history.timestamps.length > 0) ? 'block' : 'none';
-                document.getElementById('startNewSession').style.display = 
-                    (currentState === 'stopped' && data.history.timestamps.length > 0) ? 'block' : 'none';
-
-                previousState = currentState;
-
-            } catch (error) {
-                console.error('Error fetching data:', error);
-                updateSystemStatus('Connection Error');
-            }
-        }
-    </script>
-</body>
-</html>
-'''
-
 async def handle_data(request):
     global data, history, device_state, data_received, session_data, gps_coords
     
@@ -1068,14 +620,13 @@ async def handle_data(request):
         try:
             post_data = await request.json()
             status = post_data.get("status")
-            logging.debug(f"Received POST data: {post_data}")
+            client_ip = post_data.get("public_ip", request.remote)  # Prefer public_ip from Arduino
+            logging.debug(f"Received POST data from IP {client_ip}: {post_data}")
 
             if status == "arduino_ready":
                 if device_state == "disconnected":
                     device_state = "ready"
-                    logging.info(f"Arduino detected, state transitioned to: {device_state}")
-                else:
-                    logging.info(f"Arduino ready received, current state: {device_state}")
+                    logging.info(f"Arduino detected at {client_ip}, state transitioned to: {device_state}")
                 return web.json_response(
                     {"status": "ready", "state": device_state},
                     headers={"Access-Control-Allow-Origin": "*"}
@@ -1083,7 +634,7 @@ async def handle_data(request):
             
             elif status == "check_auth":
                 if auth_code is not None and runtime is not None:
-                    logging.info(f"Sending auth_code: {auth_code}, runtime: {runtime}")
+                    logging.info(f"Sending auth_code: {auth_code}, runtime: {runtime} to {client_ip}")
                     return web.json_response({
                         "status": "auth_code",
                         "code": auth_code,
@@ -1091,7 +642,7 @@ async def handle_data(request):
                         "state": device_state
                     },
                     headers={"Access-Control-Allow-Origin": "*"})
-                logging.debug(f"No auth code yet, state: {device_state}")
+                logging.debug(f"No auth code yet for {client_ip}, state: {device_state}")
                 return web.json_response(
                     {"status": "waiting", "state": device_state},
                     headers={"Access-Control-Allow-Origin": "*"}
@@ -1099,7 +650,7 @@ async def handle_data(request):
             
             elif status == "start":
                 device_state = "running"
-                logging.info(f"State transitioned to: {device_state}")
+                logging.info(f"State transitioned to: {device_state} for {client_ip}")
                 return web.json_response(
                     {"status": "running", "state": device_state},
                     headers={"Access-Control-Allow-Origin": "*"}
@@ -1107,27 +658,18 @@ async def handle_data(request):
             
             elif status == "stopped":
                 device_state = "stopped"
-                logging.info(f"State transitioned to: {device_state}")
+                logging.info(f"State transitioned to: {device_state} for {client_ip}")
                 return web.json_response(
                     {"status": "stopped", "state": device_state},
                     headers={"Access-Control-Allow-Origin": "*"}
                 )
             
             elif status == "data":
-                if "latitude" in post_data and "longitude" in post_data:
-                    gps_coords = {
-                        "latitude": post_data["latitude"],
-                        "longitude": post_data["longitude"],
-                        "source": "browser_geolocation",
-                        "accuracy": post_data.get("accuracy", 0)
-                    }
-                    logging.info(f"Received browser geolocation: {gps_coords}")
-                
-                elif "public_ip" in post_data:
-                    coords = await get_gps_from_ip(post_data["public_ip"])
+                if client_ip and client_ip != "Unknown":
+                    coords = await get_gps_from_ip(client_ip)
                     if coords["latitude"] is not None:
                         gps_coords = coords
-                        logging.info(f"Updated location from IP: {gps_coords}")
+                        logging.info(f"Updated Arduino location from IP {client_ip}: {gps_coords}")
 
                 required_fields = ['temperature', 'humidity', 'speed', 'remaining']
                 if all(field in post_data for field in required_fields):
@@ -1135,7 +677,7 @@ async def handle_data(request):
                             isinstance(post_data["humidity"], (int, float)) and 
                             isinstance(post_data["speed"], int) and 
                             isinstance(post_data["remaining"], int)):
-                        logging.warning("Invalid data types in POST data")
+                        logging.warning(f"Invalid data types in POST data from {client_ip}")
                         return web.json_response(
                             {"error": "Invalid data types"}, 
                             status=400,
@@ -1144,7 +686,7 @@ async def handle_data(request):
 
                     data_received = True
                     device_state = "running"
-                    logging.info(f"Arduino data received, state transitioned to: {device_state}")
+                    logging.info(f"Arduino data received from {client_ip}, state transitioned to: {device_state}")
                     
                     data.update({field: post_data[field] for field in required_fields})
                     
@@ -1162,7 +704,7 @@ async def handle_data(request):
                     history["timestamps"].append(timestamp)
                     history["timestamps"] = history["timestamps"][-MAX_HISTORY:]
                     
-                    logging.info(f"Stored session data: {session_record}")
+                    logging.info(f"Stored session data from {client_ip}: {session_record}")
                     return web.json_response(
                         {
                             "status": "success", 
@@ -1172,7 +714,7 @@ async def handle_data(request):
                         headers={"Access-Control-Allow-Origin": "*"}
                     )
                 
-                logging.warning("Missing fields in POST data")
+                logging.warning(f"Missing fields in POST data from {client_ip}")
                 return web.json_response(
                     {"error": "Missing required fields"}, 
                     status=400,
@@ -1180,21 +722,21 @@ async def handle_data(request):
                 )
                 
         except json.JSONDecodeError:
-            logging.error("Invalid JSON received")
+            logging.error(f"Invalid JSON received from {request.remote}")
             return web.json_response(
                 {"error": "Invalid JSON"}, 
                 status=400,
                 headers={"Access-Control-Allow-Origin": "*"}
             )
         except Exception as e:
-            logging.error(f"Error processing data: {e}")
+            logging.error(f"Error processing data from {request.remote}: {e}")
             return web.json_response(
                 {"error": "Internal server error"}, 
                 status=500,
                 headers={"Access-Control-Allow-Origin": "*"}
             )
     
-    logging.debug(f"GET request received, current state: {device_state}")
+    logging.debug(f"GET request received from {request.remote}, current state: {device_state}")
     return web.json_response({
         "state": device_state,
         "temperature": data["temperature"],
