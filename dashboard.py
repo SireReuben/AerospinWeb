@@ -83,127 +83,170 @@ async def get_gps_from_ip(ip_address):
     return {"latitude": None, "longitude": None, "source": None, "accuracy": None}
 
 def generate_pdf(session_data):
+    """Generate a PDF report from session data with improved layout and error handling"""
     filename = f"aerospin_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
     doc = SimpleDocTemplate(filename, pagesize=letter)
     styles = getSampleStyleSheet()
     elements = []
 
-    elements.append(Paragraph("Aerospin Session Report", styles['Title']))
-    elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
-    if gps_coords["latitude"] and gps_coords["longitude"]:
-        elements.append(Paragraph(
-            f"Location: Lat {gps_coords['latitude']:.6f}, Lon {gps_coords['longitude']:.6f} "
-            f"(Source: {gps_coords['source']}, Accuracy: {gps_coords['accuracy']}m)",
-            styles['Normal']
-        ))
-    elements.append(Spacer(1, 12))
+    try:
+        # Title and metadata
+        elements.append(Paragraph("Aerospin Session Report", styles['Title']))
+        elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+        
+        # Location information if available
+        if gps_coords["latitude"] and gps_coords["longitude"]:
+            location_text = (
+                f"Location: Lat {gps_coords['latitude']:.6f}, Lon {gps_coords['longitude']:.6f} "
+                f"(Source: {gps_coords['source']}, Accuracy: {gps_coords['accuracy']}m)"
+            )
+            elements.append(Paragraph(location_text, styles['Normal']))
+        else:
+            elements.append(Paragraph("Location: Not available", styles['Normal']))
+        
+        elements.append(Spacer(1, 12))
 
-    if not session_data:
-        elements.append(Paragraph("No data collected during this session", styles['Normal']))
+        if not session_data:
+            elements.append(Paragraph("No data collected during this session", styles['Normal']))
+            doc.build(elements)
+            return filename
+
+        # Extract data for charts and tables
+        timestamps = [entry["timestamp"] for entry in session_data]
+        temperatures = [entry["temperature"] for entry in session_data]
+        humidities = [entry["humidity"] for entry in session_data]
+        speeds = [entry["speed"] for entry in session_data]
+        remainings = [entry["remaining"] for entry in session_data]
+
+        # Summary Statistics Table
+        summary_data = [
+            ["Metric", "Minimum", "Maximum", "Average"],
+            ["Temperature (°C)", f"{min(temperatures):.1f}", f"{max(temperatures):.1f}", f"{np.mean(temperatures):.1f}"],
+            ["Humidity (%)", f"{min(humidities):.1f}", f"{max(humidities):.1f}", f"{np.mean(humidities):.1f}"],
+            ["Speed (%)", f"{min(speeds)}", f"{max(speeds)}", f"{np.mean(speeds):.1f}"],
+            ["Time Remaining (s)", f"{min(remainings)}", f"{max(remainings)}", f"{np.mean(remainings):.1f}"]
+        ]
+        
+        summary_table = Table(summary_data)
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
+        ]))
+        
+        elements.append(Paragraph("Summary Statistics", styles['Heading2']))
+        elements.append(summary_table)
+        elements.append(Spacer(1, 12))
+
+        # Create charts
+        plt.figure(figsize=(10, 8))
+        
+        # Temperature Chart
+        plt.subplot(4, 1, 1)
+        plt.plot(timestamps, temperatures, label='Temperature', color='red')
+        plt.title('Temperature Variation')
+        plt.ylabel('°C')
+        plt.xticks(rotation=45)
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.legend()
+
+        # Humidity Chart
+        plt.subplot(4, 1, 2)
+        plt.plot(timestamps, humidities, label='Humidity', color='blue')
+        plt.title('Humidity Variation')
+        plt.ylabel('%')
+        plt.xticks(rotation=45)
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.legend()
+
+        # Speed Chart
+        plt.subplot(4, 1, 3)
+        plt.plot(timestamps, speeds, label='Speed', color='green')
+        plt.title('Speed Variation')
+        plt.ylabel('%')
+        plt.xticks(rotation=45)
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.legend()
+
+        # Time Remaining Chart
+        plt.subplot(4, 1, 4)
+        plt.plot(timestamps, remainings, label='Time Remaining', color='purple')
+        plt.title('Time Remaining Variation')
+        plt.ylabel('Seconds')
+        plt.xlabel('Timestamp')
+        plt.xticks(rotation=45)
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.legend()
+
+        plt.tight_layout()
+        
+        # Convert plot to image
+        img_buffer = io.BytesIO()
+        plt.savefig(img_buffer, format='png', dpi=100)
+        img_buffer.seek(0)
+        plt_img = Image(img_buffer, width=500, height=400)
+        plt.close()
+
+        elements.append(Paragraph("Graphical Analysis", styles['Heading2']))
+        elements.append(plt_img)
+        elements.append(Spacer(1, 12))
+
+        # Detailed Data Table
+        table_data = [
+            ["Timestamp", "Temp (°C)", "Humid (%)", "Speed (%)", "Remaining (s)", 
+             "Latitude", "Longitude", "Source"]
+        ]
+        
+        for entry in session_data:
+            table_data.append([
+                entry["timestamp"],
+                f"{entry['temperature']:.1f}",
+                f"{entry['humidity']:.1f}",
+                f"{entry['speed']}",
+                f"{entry['remaining']}",
+                f"{entry.get('latitude', 'N/A'):.6f}" if entry.get('latitude') else "N/A",
+                f"{entry.get('longitude', 'N/A'):.6f}" if entry.get('longitude') else "N/A",
+                entry.get('source', 'N/A')
+            ])
+
+        detailed_table = Table(table_data)
+        detailed_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('FONTSIZE', (0, 1), (-1, -1), 8)
+        ]))
+        
+        # Split long tables into multiple pages
+        detailed_table.hAlign = 'CENTER'
+        
+        elements.append(Paragraph("Detailed Session Data", styles['Heading2']))
+        elements.append(detailed_table)
+
+        # Build the PDF document
         doc.build(elements)
+        logging.info(f"PDF report generated: {filename}")
         return filename
 
-    timestamps = [entry["timestamp"] for entry in session_data]
-    temperatures = [entry["temperature"] for entry in session_data]
-    humidities = [entry["humidity"] for entry in session_data]
-    speeds = [entry["speed"] for entry in session_data]
-    remainings = [entry["remaining"] for entry in session_data]
-
-    summary_data = [
-        ["Metric", "Minimum", "Maximum", "Average"],
-        ["Temperature (°C)", f"{min(temperatures):.1f}", f"{max(temperatures):.1f}", f"{np.mean(temperatures):.1f}"],
-["Humidity (%)", f"{min(humidities):.1f}", f"{max(humidities):.1f}", f"{np.mean(humidities):.1f}"],["Humidity (%)", f"{min(humidities):.1f}", f"{/10/f"{max(humidities):.1f}", f"{max(humidities):.1f}", f"{np.mean(humidities):.1f}"],
-        ["Speed (%)", f"{min(speeds)}", f"{max(speeds)}", f"{np.mean(speeds):.1f}"],
-        ["Time Remaining (s)", f"{min(remainings)}", f"{max(remainings)}", f"{np.mean(remainings):.1f}"]
-    ]
-    
-    summary_table = Table(summary_data)
-    summary_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black)
-    ]))
-    
-    elements.append(Paragraph("Summary Statistics", styles['Heading2']))
-    elements.append(summary_table)
-    elements.append(Spacer(1, 12))
-
-    plt.figure(figsize=(10, 8))
-    plt.subplot(4, 1, 1)
-    plt.plot(timestamps, temperatures, label='Temperature', color='red')
-    plt.title('Temperature Variation')
-    plt.ylabel('Temperature (°C)')
-    plt.xticks(rotation=45)
-    plt.legend()
-
-    plt.subplot(4, 1, 2)
-    plt.plot(timestamps, humidities, label='Humidity', color='blue')
-    plt.title('Humidity Variation')
-    plt.ylabel('Humidity (%)')
-    plt.xticks(rotation=45)
-    plt.legend()
-
-    plt.subplot(4, 1, 3)
-    plt.plot(timestamps, speeds, label='Speed', color='green')
-    plt.title('Speed Variation')
-    plt.ylabel('Speed (%)')
-    plt.xticks(rotation=45)
-    plt.legend()
-
-    plt.subplot(4, 1, 4)
-    plt.plot(timestamps, remainings, label='Time Remaining', color='purple')
-    plt.title('Time Remaining Variation')
-    plt.ylabel('Time (s)')
-    plt.xlabel('Timestamp')
-    plt.xticks(rotation=45)
-    plt.legend()
-
-    plt.tight_layout()
-    canvas = FigureCanvas(plt.gcf())
-    img_buffer = io.BytesIO()
-    canvas.print_png(img_buffer)
-    img_buffer.seek(0)
-    plt_img = Image(img_buffer)
-    plt_img.drawWidth = 500
-    plt_img.drawHeight = 400
-    elements.append(Paragraph("Graphical Analysis", styles['Heading2']))
-    elements.append(plt_img)
-    plt.close()
-
-    table_data = [["Timestamp", "Temperature (°C)", "Humidity (%)", "Speed (%)", "Time Remaining (s)", "Latitude", "Longitude"]]
-    for entry in session_data:
-        table_data.append([
-            entry["timestamp"],
-            f"{entry['temperature']:.1f}",
-            f"{entry['humidity']:.1f}",
-            f"{entry['speed']}",
-            f"{entry['remaining']}",
-            f"{entry.get('latitude', 'N/A'):.6f}" if entry.get('latitude') else "N/A",
-            f"{entry.get('longitude', 'N/A'):.6f}" if entry.get('longitude') else "N/A"
-        ])
-
-    table = Table(table_data)
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 14),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
-    ]))
-    
-    elements.append(Paragraph("Detailed Session Data", styles['Heading2']))
-    elements.append(table)
-
-    doc.build(elements)
-    logging.info(f"PDF generated: {filename}")
-    return filename
+    except Exception as e:
+        logging.error(f"Error generating PDF: {e}")
+        # Create error page if something went wrong
+        error_elements = [
+            Paragraph("Error Generating Report", styles['Title']),
+            Paragraph(f"An error occurred: {str(e)}", styles['Normal'])
+        ]
+        doc.build(error_elements)
+        return filename
 
 HTML_CONTENT = '''
 <!DOCTYPE html>
