@@ -112,7 +112,7 @@ def generate_pdf(session_data):
     summary_data = [
         ["Metric", "Minimum", "Maximum", "Average"],
         ["Temperature (°C)", f"{min(temperatures):.1f}", f"{max(temperatures):.1f}", f"{np.mean(temperatures):.1f}"],
-        ["Humidity (%)", f"{min(humidities):.1f}", f"{/10/f"{max(humidities):.1f}", f"{max(humidities):.1f}", f"{np.mean(humidities):.1f}"],
+["Humidity (%)", f"{min(humidities):.1f}", f"{max(humidities):.1f}", f"{np.mean(humidities):.1f}"],["Humidity (%)", f"{min(humidities):.1f}", f"{/10/f"{max(humidities):.1f}", f"{max(humidities):.1f}", f"{np.mean(humidities):.1f}"],
         ["Speed (%)", f"{min(speeds)}", f"{max(speeds)}", f"{np.mean(speeds):.1f}"],
         ["Time Remaining (s)", f"{min(remainings)}", f"{max(remainings)}", f"{np.mean(remainings):.1f}"]
     ]
@@ -1068,8 +1068,10 @@ async def handle_data(request):
         try:
             post_data = await request.json()
             status = post_data.get("status")
-            logging.debug(f"Received POST data: {post_data}")
+            client_ip = request.remote
+            logging.debug(f"Received POST data from {client_ip}: {post_data}")
 
+            # Handle different status cases
             if status == "arduino_ready":
                 if device_state == "disconnected":
                     device_state = "ready"
@@ -1114,6 +1116,7 @@ async def handle_data(request):
                 )
             
             elif status == "data":
+                # Handle location data - prioritize browser geolocation first
                 if "latitude" in post_data and "longitude" in post_data:
                     gps_coords = {
                         "latitude": post_data["latitude"],
@@ -1122,19 +1125,26 @@ async def handle_data(request):
                         "accuracy": post_data.get("accuracy", 0)
                     }
                     logging.info(f"Received browser geolocation: {gps_coords}")
-                
-                elif "public_ip" in post_data:
-                    coords = await get_gps_from_ip(post_data["public_ip"])
-                    if coords["latitude"] is not None:
-                        gps_coords = coords
-                        logging.info(f"Updated location from IP: {gps_coords}")
+                else:
+                    # Fall back to IP-based geolocation
+                    ip_to_use = post_data.get("public_ip", client_ip)
+                    if ip_to_use and ip_to_use != '127.0.0.1':
+                        try:
+                            coords = await get_gps_from_ip(ip_to_use)
+                            if coords["latitude"] is not None:
+                                gps_coords = coords
+                                logging.info(f"Updated location from IP {ip_to_use}: {gps_coords}")
+                        except Exception as e:
+                            logging.error(f"Failed to get location from IP {ip_to_use}: {e}")
 
+                # Handle sensor data
                 required_fields = ['temperature', 'humidity', 'speed', 'remaining']
                 if all(field in post_data for field in required_fields):
-                    if not (isinstance(post_data["temperature"], (int, float)) and 
-                            isinstance(post_data["humidity"], (int, float)) and 
-                            isinstance(post_data["speed"], int) and 
-                            isinstance(post_data["remaining"], int)):
+                    # Validate data types
+                    if not (isinstance(post_data["temperature"], (int, float)) or \
+                       not isinstance(post_data["humidity"], (int, float)) or \
+                       not isinstance(post_data["speed"], int) or \
+                       not isinstance(post_data["remaining"], int):
                         logging.warning("Invalid data types in POST data")
                         return web.json_response(
                             {"error": "Invalid data types"}, 
@@ -1144,10 +1154,12 @@ async def handle_data(request):
 
                     data_received = True
                     device_state = "running"
-                    logging.info(f"Arduino data received, state transitioned to: {device_state}")
+                    logging.info(f"Arduino data received, state: {device_state}")
                     
+                    # Update current data
                     data.update({field: post_data[field] for field in required_fields})
                     
+                    # Create session record
                     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
                     session_record = {
                         "timestamp": timestamp,
@@ -1156,13 +1168,14 @@ async def handle_data(request):
                     }
                     session_data.append(session_record)
                     
+                    # Update history (keeping only MAX_HISTORY entries)
                     for key in data:
                         history[key].append(data[key])
                         history[key] = history[key][-MAX_HISTORY:]
                     history["timestamps"].append(timestamp)
                     history["timestamps"] = history["timestamps"][-MAX_HISTORY:]
                     
-                    logging.info(f"Stored session data: {session_record}")
+                    logging.debug(f"Stored session data: {session_record}")
                     return web.json_response(
                         {
                             "status": "success", 
@@ -1172,7 +1185,7 @@ async def handle_data(request):
                         headers={"Access-Control-Allow-Origin": "*"}
                     )
                 
-                logging.warning("Missing fields in POST data")
+                logging.warning("Missing required fields in POST data")
                 return web.json_response(
                     {"error": "Missing required fields"}, 
                     status=400,
@@ -1194,6 +1207,7 @@ async def handle_data(request):
                 headers={"Access-Control-Allow-Origin": "*"}
             )
     
+    # Handle GET requests
     logging.debug(f"GET request received, current state: {device_state}")
     return web.json_response({
         "state": device_state,
