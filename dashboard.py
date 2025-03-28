@@ -1197,7 +1197,7 @@ async def handle_data(request):
     logging.debug(f"GET request received, current state: {device_state}")
     return web.json_response({
         "state": device_state,
-        "temperature": data多元["temperature"],
+        "temperature": data["temperature"],
         "humidity": data["humidity"],
         "speed": data["speed"],
         "remaining": data["remaining"],
