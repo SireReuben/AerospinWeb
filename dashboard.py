@@ -850,99 +850,26 @@ HTML_CONTENT = '''
 </html>
 '''
 
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-from reportlab.lib.units import inch
-from io import BytesIO
-import datetime
-import matplotlib.pyplot as plt
-import numpy as np
-from urllib.request import urlopen
-import logging
-
 def generate_pdf(session_data):
     filename = f"aerospin_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-    doc = SimpleDocTemplate(filename, pagesize=A4, leftMargin=0.75*inch, rightMargin=0.75*inch, topMargin=1*inch, bottomMargin=0.75*inch)
+    doc = SimpleDocTemplate(filename, pagesize=letter)
     styles = getSampleStyleSheet()
-
-    # Define custom styles
-    styles.add(ParagraphStyle(name='Title', fontSize=20, leading=24, alignment=TA_CENTER, textColor=colors.HexColor("#1F2A44"), fontName='Helvetica-Bold', spaceAfter=12))
-    styles.add(ParagraphStyle(name='Subtitle', fontSize=12, leading=14, alignment=TA_CENTER, textColor=colors.HexColor("#7F8C8D"), fontName='Helvetica', spaceAfter=24))
-    styles.add(ParagraphStyle(name='SectionHeader', fontSize=14, leading=18, alignment=TA_LEFT, textColor=colors.HexColor("#2980B9"), fontName='Helvetica-Bold', spaceBefore=18, spaceAfter=12))
-    styles.add(ParagraphStyle(name='BodyText', fontSize=10, leading=12, alignment=TA_LEFT, textColor=colors.HexColor("#2C3E50"), fontName='Helvetica', spaceAfter=6))
-    styles.add(ParagraphStyle(name='Footer', fontSize=8, leading=10, alignment=TA_CENTER, textColor=colors.HexColor("#BDC3C7"), fontName='Helvetica-Oblique'))
-
     elements = []
 
-    # Header with Logo and Title
-    try:
-        logo_url = "https://aerospinglobal.com/wp-content/uploads/2025/02/Aerospin-1.png"  # Replace with actual logo URL
-        logo_data = urlopen(logo_url).read()
-        logo_img = Image(BytesIO(logo_data), width=120, height=60)
-        logo_img.hAlign = 'LEFT'
-        elements.append(logo_img)
-    except Exception as e:
-        logging.warning(f"Could not load logo from {logo_url}: {str(e)}")
-        elements.append(Paragraph("Aerospin", styles['Title']))  # Fallback
-
     elements.append(Paragraph("Aerospin Session Report", styles['Title']))
-    elements.append(Paragraph(f"Generated on: {datetime.datetime.now().strftime('%B %d, %Y at %H:%M:%S')}", styles['Subtitle']))
-    
+    elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
     if gps_coords["latitude"] and gps_coords["longitude"]:
-        location_text = f"Device Location: Latitude {gps_coords['latitude']:.6f}, Longitude {gps_coords['longitude']:.6f} " \
-                       f"(Source: {gps_coords['source']}, Accuracy: {gps_coords['accuracy']}m)"
-        elements.append(Paragraph(location_text, styles['Subtitle']))
-
-    elements.append(Spacer(1, 0.25*inch))
+        elements.append(Paragraph(
+            f"Device Location: Lat {gps_coords['latitude']:.6f}, Lon {gps_coords['longitude']:.6f} "
+            f"(Source: {gps_coords['source']}, Accuracy: {gps_coords['accuracy']}m)",
+            styles['Normal']
+        ))
+    elements.append(Spacer(1, 12))
 
     if not session_data:
-        elements.append(Paragraph("No data collected during this session.", styles['BodyText']))
+        elements.append(Paragraph("No data collected during this session", styles['Normal']))
         doc.build(elements)
         return filename
-
-    # Summary Statistics Section
-    elements.append(Paragraph("Summary Statistics", styles['SectionHeader']))
-    summary_data = [
-        ["Metric", "Minimum", "Maximum", "Average"],
-        ["Temperature (°C)", f"{min([entry['temperature'] for entry in session_data]):.1f}", 
-         f"{max([entry['temperature'] for entry in session_data]):.1f}", 
-         f"{np.mean([entry['temperature'] for entry in session_data]):.1f}"],
-        ["Humidity (%)", f"{min([entry['humidity'] for entry in session_data]):.1f}", 
-         f"{max([entry['humidity'] for entry in session_data]):.1f}", 
-         f"{np.mean([entry['humidity'] for entry in session_data]):.1f}"],
-        ["Speed (%)", f"{min([entry['speed'] for entry in session_data]):.1f}", 
-         f"{max([entry['speed'] for entry in session_data]):.1f}", 
-         f"{np.mean([entry['speed'] for entry in session_data]):.1f}"],
-        ["Time Remaining (s)", f"{min([entry['remaining'] for entry in session_data]):.1f}", 
-         f"{max([entry['remaining'] for entry in session_data]):.1f}", 
-         f"{np.mean([entry['remaining'] for entry in session_data]):.1f}"]
-    ]
-    
-    summary_table = Table(summary_data, colWidths=[2*inch, 1.25*inch, 1.25*inch, 1.25*inch])
-    summary_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#34495E")),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#ECF0F1")),
-        ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor("#2C3E50")),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#BDC3C7")),
-        ('FONTSIZE', (0, 1), (-1, -1), 9),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F7F9F9")])
-    ]))
-    elements.append(summary_table)
-    elements.append(Spacer(1, 0.5*inch))
-
-    # Graphical Analysis Section
-    elements.append(Paragraph("Graphical Analysis", styles['SectionHeader']))
-    plt.style.use('seaborn-v0_8-whitegrid')  # Professional matplotlib style
-    fig, axs = plt.subplots(4, 1, figsize=(7.5, 9), sharex=True)
-    fig.suptitle("Session Data Trends", fontsize=14, fontweight='bold', color='#1F2A44')
 
     timestamps = [entry["timestamp"] for entry in session_data]
     temperatures = [entry["temperature"] for entry in session_data]
@@ -950,81 +877,101 @@ def generate_pdf(session_data):
     speeds = [entry["speed"] for entry in session_data]
     remainings = [entry["remaining"] for entry in session_data]
 
-    # Plot configurations
-    plots = [
-        (temperatures, "Temperature (°C)", "#E74C3C", axs[0]),
-        (humidities, "Humidity (%)", "#3498DB", axs[1]),
-        (speeds, "Speed (%)", "#2ECC71", axs[2]),
-        (remainings, "Time Remaining (s)", "#9B59B6", axs[3])
+    summary_data = [
+        ["Metric", "Minimum", "Maximum", "Average"],
+        ["Temperature (°C)", f"{min(temperatures):.1f}", f"{max(temperatures):.1f}", f"{np.mean(temperatures):.1f}"],
+        ["Humidity (%)", f"{min(humidities):.1f}", f"{max(humidities):.1f}", f"{np.mean(humidities):.1f}"],
+        ["Speed (%)", f"{min(speeds)}", f"{max(speeds)}", f"{np.mean(speeds):.1f}"],
+        ["Time Remaining (s)", f"{min(remainings)}", f"{max(remainings)}", f"{np.mean(remainings):.1f}"]
     ]
     
-    for data, label, color, ax in plots:
-        ax.plot(timestamps, data, label=label, color=color, linewidth=2, marker='o', markersize=4)
-        ax.set_ylabel(label, fontsize=9)
-        ax.legend(loc='upper right', fontsize=8, frameon=True, edgecolor='#BDC3C7')
-        ax.tick_params(axis='both', labelsize=8)
-        ax.grid(True, linestyle='--', alpha=0.5)
+    summary_table = Table(summary_data)
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    
+    elements.append(Paragraph("Summary Statistics", styles['Heading2']))
+    elements.append(summary_table)
+    elements.append(Spacer(1, 12))
 
-    axs[3].set_xlabel("Timestamp", fontsize=9)
-    plt.xticks(rotation=45, ha='right')
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.figure(figsize=(10, 8))
+    plt.subplot(4, 1, 1)
+    plt.plot(timestamps, temperatures, label='Temperature', color='red')
+    plt.title('Temperature Variation')
+    plt.ylabel('Temperature (°C)')
+    plt.xticks(rotation=45)
+    plt.legend()
 
-    img_buffer = BytesIO()
-    plt.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight')
+    plt.subplot(4, 1, 2)
+    plt.plot(timestamps, humidities, label='Humidity', color='blue')
+    plt.title('Humidity Variation')
+    plt.ylabel('Humidity (%)')
+    plt.xticks(rotation=45)
+    plt.legend()
+
+    plt.subplot(4, 1, 3)
+    plt.plot(timestamps, speeds, label='Speed', color='green')
+    plt.title('Speed Variation')
+    plt.ylabel('Speed (%)')
+    plt.xticks(rotation=45)
+    plt.legend()
+
+    plt.subplot(4, 1, 4)
+    plt.plot(timestamps, remainings, label='Time Remaining', color='purple')
+    plt.title('Time Remaining Variation')
+    plt.ylabel('Time (s)')
+    plt.xlabel('Timestamp')
+    plt.xticks(rotation=45)
+    plt.legend()
+
+    plt.tight_layout()
+    canvas = FigureCanvas(plt.gcf())
+    img_buffer = io.BytesIO()
+    canvas.print_png(img_buffer)
     img_buffer.seek(0)
-    plt_img = Image(img_buffer, width=6.5*inch, height=8*inch)
+    plt_img = Image(img_buffer)
+    plt_img.drawWidth = 500
+    plt_img.drawHeight = 400
+    elements.append(Paragraph("Graphical Analysis", styles['Heading2']))
     elements.append(plt_img)
     plt.close()
-    elements.append(PageBreak())
 
-    # Detailed Session Data Section
-    elements.append(Paragraph("Detailed Session Data", styles['SectionHeader']))
-    table_data = [["Timestamp", "Temp (°C)", "Humid (%)", "Speed (%)", "Time (s)", "Lat", "Lon"]]
+    table_data = [["Timestamp", "Temperature (°C)", "Humidity (%)", "Speed (%)", "Time Remaining (s)", "Latitude", "Longitude"]]
     for entry in session_data:
         table_data.append([
             entry["timestamp"],
             f"{entry['temperature']:.1f}",
             f"{entry['humidity']:.1f}",
-            f"{entry['speed']:.1f}",
-            f"{entry['remaining']:.1f}",
+            f"{entry['speed']}",
+            f"{entry['remaining']}",
             f"{entry.get('latitude', 'N/A'):.6f}" if entry.get('latitude') else "N/A",
             f"{entry.get('longitude', 'N/A'):.6f}" if entry.get('longitude') else "N/A"
         ])
 
-    detailed_table = Table(table_data, colWidths=[1.25*inch, 0.9*inch, 0.9*inch, 0.9*inch, 0.9*inch, 1.2*inch, 1.2*inch])
-    detailed_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#34495E")),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+    table = Table(table_data)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 9),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#ECF0F1")),
-        ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor("#2C3E50")),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#BDC3C7")),
-        ('FONTSIZE', (0, 1), (-1, -1), 8),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F7F9F9")])
+        ('FONTSIZE', (0, 0), (-1, 0), 14),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
     ]))
-    elements.append(detailed_table)
-    elements.append(Spacer(1, 0.25*inch))
+    
+    elements.append(Paragraph("Detailed Session Data", styles['Heading2']))
+    elements.append(table)
 
-    # Footer
-    footer_text = f"Aerospin Professional Data Analysis Report | Generated on {datetime.datetime.now().strftime('%Y-%m-%d')} | Confidential"
-    elements.append(Paragraph(footer_text, styles['Footer']))
-
-    # Build the document with a custom page template
-    def add_page_number(canvas, doc):
-        canvas.saveState()
-        canvas.setFont('Helvetica-Oblique', 8)
-        canvas.setFillColor(colors.HexColor("#BDC3C7"))
-        page_num = f"Page {doc.page}"
-        canvas.drawRightString(A4[0] - 0.75*inch, 0.5*inch, page_num)
-        canvas.restoreState()
-
-    doc.build(elements, onFirstPage=add_page_number, onLaterPages=add_page_number)
+    doc.build(elements)
     logging.info(f"PDF generated: {filename}")
     return filename
-
 async def handle_data(request):
     global data, history, device_state, data_received, session_data, gps_coords, vpn_info
     
