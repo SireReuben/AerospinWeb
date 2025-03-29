@@ -19,7 +19,7 @@ MAX_HISTORY = 20
 VALID_DEVICE_STATES = ["disconnected", "ready", "waiting", "running", "stopped"]
 VALID_AUTH_CODE_MIN = 100
 VALID_AUTH_CODE_MAX = 999
-GOOGLE_API_KEY = "AIzaSyDpCPfntL6CEXPoOVPf2RmfmCjfV7rfano"  # Replace with your actual Google API key
+GOOGLE_API_KEY = "AIzaSyDpCPfntL6CEXPoOVPf2RmfmCjfV7rfano"  # Replace with your real Google API key
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -87,10 +87,10 @@ async def check_vpn(ip_address):
 async def get_gps_from_ip(ip_address):
     logging.debug(f"Attempting IP geolocation for: {ip_address}")
     try:
-        # Google Geolocation API
-        url = f"https://www.googleapis.com/geolocation/v1/geolocate?key={GOOGLE_API_KEY}"
-        payload = {"considerIp": True}
         async with ClientSession() as session:
+            # Google Geolocation API
+            url = f"https://www.googleapis.com/geolocation/v1/geolocate?key={GOOGLE_API_KEY}"
+            payload = {"considerIp": True}
             async with session.post(url, json=payload) as response:
                 if response.status == 200:
                     data = await response.json()
@@ -105,12 +105,9 @@ async def get_gps_from_ip(ip_address):
                         }
                     else:
                         logging.debug(f"Google accuracy too low: {accuracy}")
-                else:
-                    logging.warning(f"Google API failed with status: {response.status}")
 
-        # Fallback to ip-api.com
-        ip_url = f"http://ip-api.com/json/{ip_address}?fields=status,message,lat,lon"
-        async with ClientSession() as session:
+            # Fallback to ip-api.com
+            ip_url = f"http://ip-api.com/json/{ip_address}?fields=status,message,lat,lon"
             async with session.get(ip_url) as response:
                 if response.status == 200:
                     ip_data = await response.json()
@@ -133,6 +130,7 @@ async def get_gps_from_ip(ip_address):
     logging.warning(f"No valid geolocation data for IP: {ip_address}")
     return {"latitude": None, "longitude": None, "source": None, "accuracy": None}
 
+# HTML content remains unchanged; omitted for brevity but should be identical to your original
 HTML_CONTENT = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -988,7 +986,8 @@ async def handle_data(request):
         try:
             post_data = await request.json()
             status = post_data.get("status")
-            client_ip = post_data.get("public_ip", request.remote)
+            # Use request.remote directly for the client's public IP
+            client_ip = request.remote
             logging.debug(f"Received POST data from IP {client_ip}: {post_data}")
 
             vpn_info = await check_vpn(client_ip)
