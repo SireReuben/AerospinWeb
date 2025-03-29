@@ -12,14 +12,14 @@ from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.lib.styles import getSampleStyleSheet
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-from cachetools import TTLCache  # Added for VPN caching
+from cachetools import TTLCache
 
 PORT = int(os.environ.get("PORT", 10000))
 MAX_HISTORY = 20
 VALID_DEVICE_STATES = ["disconnected", "ready", "waiting", "running", "stopped"]
 VALID_AUTH_CODE_MIN = 100
 VALID_AUTH_CODE_MAX = 999
-GOOGLE_API_KEY = "AIzaSyDpCPfntL6CEXPoOVPf2RmfmCjfV7rfano"  # Replace with your Google API key
+GOOGLE_API_KEY = "YOUR_GOOGLE_API_KEY_HERE"  # Replace with your actual Google API key
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -38,11 +38,10 @@ session_data = []
 auth_code = None
 runtime = None
 gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": None}
-vpn_cache = TTLCache(maxsize=100, ttl=300)  # Cache for 5 minutes, 100 IPs
+vpn_cache = TTLCache(maxsize=100, ttl=300)
 vpn_info = {"is_vpn": False, "confidence": 0, "details": "No data yet"}
 
 async def check_vpn(ip_address):
-    """Enhanced VPN detection with caching"""
     if ip_address in vpn_cache:
         logging.debug(f"VPN status from cache for {ip_address}")
         return vpn_cache[ip_address]
@@ -52,7 +51,6 @@ async def check_vpn(ip_address):
     
     try:
         async with ClientSession() as session:
-            # ip-api.com
             url = f"http://ip-api.com/json/{ip_address}?fields=status,message,proxy,hosting,org"
             async with session.get(url, timeout=5) as response:
                 if response.status == 200:
@@ -68,30 +66,6 @@ async def check_vpn(ip_address):
                         if any(keyword in org for keyword in ["vpn", "proxy", "cloud", "hosting"]):
                             vpn_indicators.append(f"Org: {org}")
                             confidence_score += 20
-
-            # ipinfo.io
-            url = f"https://ipinfo.io/{ip_address}/json"
-            async with session.get(url, timeout=5) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    if data.get("vpn", False):
-                        vpn_indicators.append("VPN flagged")
-                        confidence_score += 50
-                    if "org" in data and any(keyword in data["org"].lower() for keyword in ["vpn", "proxy"]):
-                        vpn_indicators.append(f"Org: {data['org']}")
-                        confidence_score += 20
-
-            # db-ip.com
-            url = f"https://api.db-ip.com/v2/free/{ip_address}"
-            async with session.get(url, timeout=5) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    if data.get("isDatacenter", False):
-                        vpn_indicators.append("Datacenter IP")
-                        confidence_score += 35
-                    if "isp" in data and any(keyword in data["isp"].lower() for keyword in ["vpn", "proxy", "cloud"]):
-                        vpn_indicators.append(f"ISP: {data['isp']}")
-                        confidence_score += 25
 
         is_vpn = confidence_score >= 50
         details = "; ".join(vpn_indicators) if vpn_indicators else "No VPN indicators"
@@ -110,6 +84,52 @@ async def check_vpn(ip_address):
         vpn_cache[ip_address] = vpn_info
         return vpn_info
 
+async def get_gps_from_ip(ip_address):
+    logging.debug(f"Attempting IP geolocation for: {ip_address}")
+    try:
+        # Try Google Geolocation API first
+        url = f"https://www.googleapis.com/geolocation/v1/geolocate?key={GOOGLE_API_KEY}"
+        payload = {"considerIp": True}
+        
+        async with ClientSession() as session:
+            async with session.post(url, json=payload) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    accuracy = data.get("accuracy", 0)
+                    if accuracy < 50000:
+                        logging.info(f"Google Geolocation success: {data}")
+                        return {
+                            "latitude": data["location"]["lat"],
+                            "longitude": data["location"]["lng"],
+                            "source": "google_geolocation",
+                            "accuracy": accuracy
+                        }
+                    else:
+                        logging.debug(f"Google Geolocation accuracy too low: {accuracy}")
+
+        # Fallback to ip-api.com
+        ip_url = f"http://ip-api.com/json/{ip_address}?fields=status,message,lat,lon"
+        async with ClientSession() as session:
+            async with session.get(ip_url) as response:
+                if response.status == 200:
+                    ip_data = await response.json()
+                    if ip_data.get("status") == "success":
+                        logging.info(f"IP-API success: {ip_data}")
+                        return {
+                            "latitude": ip_data["lat"],
+                            "longitude": ip_data["lon"],
+                            "source": "ip_api",
+                            "accuracy": 50000
+                        }
+                    else:
+                        logging.warning(f"IP-API failed: {ip_data.get('message', 'Unknown error')}")
+    
+    except Exception as e:
+        logging.error(f"Geolocation error for IP {ip_address}: {e}")
+    
+    logging.warning(f"No valid geolocation data for IP: {ip_address}")
+    return {"latitude": None, "longitude": None, "source": None, "accuracy": None}
+
 HTML_CONTENT = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -123,7 +143,6 @@ HTML_CONTENT = '''
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
     <script async defer src="https://maps.googleapis.com/maps/api/js?key=''' + GOOGLE_API_KEY + '''&libraries=places,marker&v=weekly&callback=initMap"></script>
     <style>
-        /* Your existing styles remain unchanged */
         :root {
             --primary: #4361ee;
             --secondary: #3a0ca3;
@@ -590,34 +609,24 @@ HTML_CONTENT = '''
         }
 
         function initMap() {
-    if (!window.google || !window.google.maps) {
-        console.error("Google Maps API not loaded yet. Retrying in 1 second...");
-        setTimeout(initMap, 1000);
-        return;
-    }
-    map = new google.maps.Map(document.getElementById('map'), {
-        center: { lat: 20, lng: 54 },
-        zoom: 2,
-        mapTypeId: 'roadmap',
-        mapId: 'YOUR_MAP_ID_HERE', // Replace with your Map ID
-        styles: [
-            {
-                "featureType": "all",
-                "elementType": "all",
-                "stylers": [
-                    { "saturation": -20 },
-                    { "lightness": 10 }
-                ]
+            if (!window.google || !window.google.maps) {
+                console.error("Google Maps API not loaded yet. Retrying in 1 second...");
+                setTimeout(initMap, 1000);
+                return;
             }
-        ]
-    });
-    isMapInitialized = true;
-    console.log("Map initialized successfully");
-}
+            map = new google.maps.Map(document.getElementById('map'), {
+                center: { lat: 20, lng: 54 },
+                zoom: 2,
+                mapTypeId: 'roadmap'
+            });
+            isMapInitialized = true;
+            console.log("Map initialized successfully");
+        }
 
         function updateMap(latitude, longitude) {
             if (!isMapInitialized || !window.google || !window.google.maps || !map) {
-                console.error("Map not initialized yet or Google Maps API not loaded.");
+                console.error("Map not initialized yet or Google Maps API not loaded. Retrying...");
+                setTimeout(() => updateMap(latitude, longitude), 1000);
                 return;
             }
             if (latitude && longitude) {
@@ -642,6 +651,8 @@ HTML_CONTENT = '''
 
                 map.setCenter(position);
                 map.setZoom(13);
+            } else {
+                console.warn("No valid coordinates provided for map update");
             }
         }
 
@@ -657,6 +668,7 @@ HTML_CONTENT = '''
 
         document.addEventListener('DOMContentLoaded', function() {
             initCharts();
+            initMap();  // Ensure map initializes on load
             document.getElementById('submitSetup').addEventListener('click', submitSetup);
             document.getElementById('stopButton').addEventListener('click', stopSystem);
             document.getElementById('downloadPdf').addEventListener('click', downloadPdf);
@@ -786,6 +798,8 @@ HTML_CONTENT = '''
                     if (data.gps?.latitude && data.gps?.longitude) {
                         console.log(`Arduino GPS data received: Lat ${data.gps.latitude}, Lon ${data.gps.longitude}`);
                         updateMap(data.gps.latitude, data.gps.longitude);
+                    } else {
+                        console.warn("No GPS data in response");
                     }
                 }
 
@@ -822,47 +836,6 @@ HTML_CONTENT = '''
 </body>
 </html>
 '''
-
-async def get_gps_from_ip(ip_address):
-    """IP-based geolocation for the Arduino device"""
-    logging.debug(f"Attempting IP geolocation for: {ip_address}")
-    try:
-        url = f"https://www.googleapis.com/geolocation/v1/geolocate?key={GOOGLE_API_KEY}"
-        payload = {"considerIp": True}
-        
-        async with ClientSession() as session:
-            async with session.post(url, json=payload) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    accuracy = data.get("accuracy", 0)
-                    if accuracy < 50000:
-                        logging.info(f"Google Geolocation success: {data}")
-                        return {
-                            "latitude": data["location"]["lat"],
-                            "longitude": data["location"]["lng"],
-                            "source": "google_geolocation",
-                            "accuracy": accuracy
-                        }
-        
-        ip_url = f"http://ip-api.com/json/{ip_address}?fields=status,message,lat,lon"
-        async with ClientSession() as session:
-            async with session.get(ip_url) as response:
-                if response.status == 200:
-                    ip_data = await response.json()
-                    if ip_data.get("status") == "success":
-                        logging.info(f"IP-API success: {ip_data}")
-                        return {
-                            "latitude": ip_data["lat"],
-                            "longitude": ip_data["lon"],
-                            "source": "ip_api",
-                            "accuracy": 50000
-                        }
-    
-    except Exception as e:
-        logging.error(f"Geolocation error: {e}")
-    
-    logging.warning(f"No valid geolocation data for IP: {ip_address}")
-    return {"latitude": None, "longitude": None, "source": None, "accuracy": None}
 
 def generate_pdf(session_data):
     filename = f"aerospin_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
@@ -1055,6 +1028,8 @@ async def handle_data(request):
                     if coords["latitude"] is not None:
                         gps_coords = coords
                         logging.info(f"Updated Arduino location from IP {client_ip}: {gps_coords}")
+                    else:
+                        logging.warning(f"Failed to geolocate IP {client_ip}")
 
                 required_fields = ['temperature', 'humidity', 'speed', 'remaining']
                 if all(field in post_data for field in required_fields):
@@ -1089,7 +1064,7 @@ async def handle_data(request):
                     history["timestamps"].append(timestamp)
                     history["timestamps"] = history["timestamps"][-MAX_HISTORY:]
                     
-                    logging.debug(f"Updated history: {history}")  # Added for debugging
+                    logging.debug(f"Updated history: {history}")
                     
                     return web.json_response(
                         {
