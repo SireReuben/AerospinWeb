@@ -4,3 +4,4 @@ matplotlib==3.8.4
 numpy==1.26.4
 reportlab==4.2.0
 cachetools==5.3.3
+seaborn==0.13.2
