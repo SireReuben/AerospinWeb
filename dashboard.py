@@ -986,8 +986,13 @@ async def handle_data(request):
         try:
             post_data = await request.json()
             status = post_data.get("status")
-            # Use request.remote directly for the client's public IP
-            client_ip = request.remote
+            # Use the public IP provided by Arduino if available
+            public_ip = post_data.get("public_ip")
+            if public_ip and public_ip != "Unknown":
+                client_ip = public_ip
+            else:
+                client_ip = request.remote
+            
             logging.debug(f"Received POST data from IP {client_ip}: {post_data}")
 
             vpn_info = await check_vpn(client_ip)
@@ -1034,12 +1039,10 @@ async def handle_data(request):
                 )
             
             elif status == "data":
-                if client_ip and client_ip != "Unknown":
-                    coords = await get_gps_from_ip(client_ip)
-                    gps_coords = coords
-                    logging.info(f"Updated GPS coords for {client_ip}: {gps_coords}")
-                else:
-                    logging.warning(f"Invalid IP {client_ip}, keeping existing GPS coords: {gps_coords}")
+                # Get coordinates using the client's public IP
+                coords = await get_gps_from_ip(client_ip)
+                gps_coords = coords
+                logging.info(f"Updated GPS coords for {client_ip}: {gps_coords}")
 
                 required_fields = ['temperature', 'humidity', 'speed', 'remaining']
                 if all(field in post_data for field in required_fields):
