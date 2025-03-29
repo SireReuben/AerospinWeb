@@ -19,7 +19,7 @@ MAX_HISTORY = 20
 VALID_DEVICE_STATES = ["disconnected", "ready", "waiting", "running", "stopped"]
 VALID_AUTH_CODE_MIN = 100
 VALID_AUTH_CODE_MAX = 999
-GOOGLE_API_KEY = "YOUR_GOOGLE_API_KEY_HERE"  # Replace with your actual Google API key
+GOOGLE_API_KEY = "AIzaSyDpCPfntL6CEXPoOVPf2RmfmCjfV7rfano"  # Replace with your actual Google API key
 
 logging.basicConfig(
     level=logging.DEBUG,
