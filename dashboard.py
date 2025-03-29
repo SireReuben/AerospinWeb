@@ -105,6 +105,8 @@ async def get_gps_from_ip(ip_address):
                         }
                     else:
                         logging.debug(f"Google accuracy too low: {accuracy}")
+                else:
+                    logging.warning(f"Google API failed with status: {response.status}")
 
         # Fallback to ip-api.com
         ip_url = f"http://ip-api.com/json/{ip_address}?fields=status,message,lat,lon"
@@ -129,7 +131,6 @@ async def get_gps_from_ip(ip_address):
         logging.error(f"Geolocation error for IP {ip_address}: {e}")
     
     logging.warning(f"No valid geolocation data for IP: {ip_address}, using fallback coordinates")
-    # Fallback coordinates (San Francisco) for testing
     return {"latitude": 37.7749, "longitude": -122.4194, "source": "fallback", "accuracy": 100000}
 
 # HTML content remains unchanged except for the fetchData() function, updated below
