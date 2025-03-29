@@ -849,75 +849,31 @@ HTML_CONTENT = '''
 
 def generate_pdf(session_data):
     filename = f"aerospin_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-    doc = SimpleDocTemplate(filename, pagesize=A4)  # Changed to A4
+    doc = SimpleDocTemplate(filename, pagesize=letter)
     styles = getSampleStyleSheet()
-    
-    # Create custom styles
-    styles.add(ParagraphStyle(name='Header1', 
-                            fontSize=18, 
-                            leading=22, 
-                            alignment=TA_CENTER,
-                            textColor=colors.HexColor("#2c3e50"),
-                            fontName='Helvetica-Bold'))
-    
-    styles.add(ParagraphStyle(name='Header2', 
-                            fontSize=14, 
-                            leading=18, 
-                            alignment=TA_LEFT,
-                            textColor=colors.HexColor("#3498db"),
-                            fontName='Helvetica-Bold',
-                            spaceAfter=12))
-    
-    styles.add(ParagraphStyle(name='Subheader', 
-                            fontSize=10, 
-                            leading=12, 
-                            alignment=TA_CENTER,
-                            textColor=colors.HexColor("#7f8c8d"),
-                            fontName='Helvetica'))
-    
-    styles.add(ParagraphStyle(name='Footer', 
-                            fontSize=8, 
-                            leading=10, 
-                            alignment=TA_CENTER,
-                            textColor=colors.HexColor("#95a5a6"),
-                            fontName='Helvetica-Oblique'))
-    
     elements = []
 
-    # Add header with logo (replace with actual logo if available)
-    logo_url = "https://aerospinglobal.com/wp-content/uploads/2025/02/Aerospin-1.png"  # Replace with your actual logo URL
-    try:
-        logo_data = urlopen(logo_url).read()
-        logo_img = Image(BytesIO(logo_data), width=100, height=50)
-        elements.append(logo_img)
-        elements.append(Spacer(1, 12))
-    except Exception as e:
-        logging.warning(f"Could not load logo from {logo_url}: {str(e)}")
-        # Continue without logo if there's an error
-    
-    elements.append(Paragraph("AEROSPIN SESSION REPORT", styles['Header1']))
-    elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Subheader']))
-    
+    elements.append(Paragraph("Aerospin Session Report", styles['Title']))
+    elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
     if gps_coords["latitude"] and gps_coords["longitude"]:
-        location_text = f"Device Location: Lat {gps_coords['latitude']:.6f}, Lon {gps_coords['longitude']:.6f}"
-        location_text += f" (Source: {gps_coords['source']}, Accuracy: {gps_coords['accuracy']}m)"
-        elements.append(Paragraph(location_text, styles['Subheader']))
-    
-    elements.append(Spacer(1, 24))  # Increased spacing
+        elements.append(Paragraph(
+            f"Device Location: Lat {gps_coords['latitude']:.6f}, Lon {gps_coords['longitude']:.6f} "
+            f"(Source: {gps_coords['source']}, Accuracy: {gps_coords['accuracy']}m)",
+            styles['Normal']
+        ))
+    elements.append(Spacer(1, 12))
 
     if not session_data:
         elements.append(Paragraph("No data collected during this session", styles['Normal']))
         doc.build(elements)
         return filename
 
-    # Extract data
     timestamps = [entry["timestamp"] for entry in session_data]
     temperatures = [entry["temperature"] for entry in session_data]
     humidities = [entry["humidity"] for entry in session_data]
     speeds = [entry["speed"] for entry in session_data]
     remainings = [entry["remaining"] for entry in session_data]
 
-    # Summary Statistics Table
     summary_data = [
         ["Metric", "Minimum", "Maximum", "Average"],
         ["Temperature (°C)", f"{min(temperatures):.1f}", f"{max(temperatures):.1f}", f"{np.mean(temperatures):.1f}"],
@@ -926,79 +882,63 @@ def generate_pdf(session_data):
         ["Time Remaining (s)", f"{min(remainings)}", f"{max(remainings)}", f"{np.mean(remainings):.1f}"]
     ]
     
-    summary_table = Table(summary_data, colWidths=[120, 80, 80, 80])
+    summary_table = Table(summary_data)
     summary_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#ecf0f1")),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#bdc3c7")),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#f9f9f9")])
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
     ]))
     
-    elements.append(Paragraph("Summary Statistics", styles['Header2']))
+    elements.append(Paragraph("Summary Statistics", styles['Heading2']))
     elements.append(summary_table)
-    elements.append(Spacer(1, 24))
+    elements.append(Spacer(1, 12))
 
-    # Graphical Analysis
     plt.figure(figsize=(10, 8))
-    
-    # Create more professional looking plots
     plt.subplot(4, 1, 1)
-    plt.plot(timestamps, temperatures, label='Temperature', color='#e74c3c', linewidth=2)
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.title('Temperature Variation', fontsize=10, pad=10)
-    plt.ylabel('°C', fontsize=8)
-    plt.xticks(rotation=45, fontsize=8)
-    plt.yticks(fontsize=8)
-    plt.legend(fontsize=8, framealpha=0.5)
+    plt.plot(timestamps, temperatures, label='Temperature', color='red')
+    plt.title('Temperature Variation')
+    plt.ylabel('Temperature (°C)')
+    plt.xticks(rotation=45)
+    plt.legend()
 
     plt.subplot(4, 1, 2)
-    plt.plot(timestamps, humidities, label='Humidity', color='#3498db', linewidth=2)
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.title('Humidity Variation', fontsize=10, pad=10)
-    plt.ylabel('%', fontsize=8)
-    plt.xticks(rotation=45, fontsize=8)
-    plt.yticks(fontsize=8)
-    plt.legend(fontsize=8, framealpha=0.5)
+    plt.plot(timestamps, humidities, label='Humidity', color='blue')
+    plt.title('Humidity Variation')
+    plt.ylabel('Humidity (%)')
+    plt.xticks(rotation=45)
+    plt.legend()
 
     plt.subplot(4, 1, 3)
-    plt.plot(timestamps, speeds, label='Speed', color='#2ecc71', linewidth=2)
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.title('Speed Variation', fontsize=10, pad=10)
-    plt.ylabel('%', fontsize=8)
-    plt.xticks(rotation=45, fontsize=8)
-    plt.yticks(fontsize=8)
-    plt.legend(fontsize=8, framealpha=0.5)
+    plt.plot(timestamps, speeds, label='Speed', color='green')
+    plt.title('Speed Variation')
+    plt.ylabel('Speed (%)')
+    plt.xticks(rotation=45)
+    plt.legend()
 
     plt.subplot(4, 1, 4)
-    plt.plot(timestamps, remainings, label='Time Remaining', color='#9b59b6', linewidth=2)
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.title('Time Remaining Variation', fontsize=10, pad=10)
-    plt.ylabel('Seconds', fontsize=8)
-    plt.xlabel('Timestamp', fontsize=8)
-    plt.xticks(rotation=45, fontsize=8)
-    plt.yticks(fontsize=8)
-    plt.legend(fontsize=8, framealpha=0.5)
+    plt.plot(timestamps, remainings, label='Time Remaining', color='purple')
+    plt.title('Time Remaining Variation')
+    plt.ylabel('Time (s)')
+    plt.xlabel('Timestamp')
+    plt.xticks(rotation=45)
+    plt.legend()
 
-    plt.tight_layout(pad=2.0)
+    plt.tight_layout()
     canvas = FigureCanvas(plt.gcf())
     img_buffer = io.BytesIO()
     canvas.print_png(img_buffer)
     img_buffer.seek(0)
     plt_img = Image(img_buffer)
-    plt_img.drawWidth = 500  # Adjusted for A4
-    plt_img.drawHeight = 600  # Adjusted for A4
-    elements.append(Paragraph("Graphical Analysis", styles['Header2']))
+    plt_img.drawWidth = 500
+    plt_img.drawHeight = 400
+    elements.append(Paragraph("Graphical Analysis", styles['Heading2']))
     elements.append(plt_img)
     plt.close()
-    elements.append(Spacer(1, 24))
 
-    # Detailed Session Data Table
-    table_data = [["Timestamp", "Temp (°C)", "Humidity (%)", "Speed (%)", "Time (s)", "Latitude", "Longitude"]]
+    table_data = [["Timestamp", "Temperature (°C)", "Humidity (%)", "Speed (%)", "Time Remaining (s)", "Latitude", "Longitude"]]
     for entry in session_data:
         table_data.append([
             entry["timestamp"],
@@ -1010,27 +950,21 @@ def generate_pdf(session_data):
             f"{entry.get('longitude', 'N/A'):.6f}" if entry.get('longitude') else "N/A"
         ])
 
-    # Create a more compact table with alternating row colors
-    table = Table(table_data, colWidths=[90, 50, 50, 50, 50, 70, 70])
+    table = Table(table_data)
     table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#ecf0f1")),
-        ('GRID', (0, 0), (-1, -1), 0.25, colors.HexColor("#bdc3c7")),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#f9f9f9")])
+        ('FONTSIZE', (0, 0), (-1, 0), 14),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
     ]))
     
-    elements.append(Paragraph("Detailed Session Data", styles['Header2']))
+    elements.append(Paragraph("Detailed Session Data", styles['Heading2']))
     elements.append(table)
-    elements.append(Spacer(1, 12))
-    
-    # Add footer
-    elements.append(Paragraph("Aerospin - Professional Data Analysis Report", styles['Footer']))
-    elements.append(Paragraph("Confidential - For internal use only", styles['Footer']))
 
     doc.build(elements)
     logging.info(f"PDF generated: {filename}")
