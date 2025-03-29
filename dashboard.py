@@ -885,10 +885,15 @@ def generate_pdf(session_data):
     elements = []
 
     # Add header with logo (replace with actual logo if available)
-    logo_path = "https://aerospinglobal.com/wp-content/uploads/2025/02/Aerospin-1.png"  # You should add your company logo here
-    if os.path.exists(logo_path):
-        logo = Image(logo_path, width=100, height=50)
-        elements.append(logo)
+    logo_url = "https://aerospinglobal.com/wp-content/uploads/2025/02/Aerospin-1.png"  # Replace with your actual logo URL
+    try:
+        logo_data = urlopen(logo_url).read()
+        logo_img = Image(BytesIO(logo_data), width=100, height=50)
+        elements.append(logo_img)
+        elements.append(Spacer(1, 12))
+    except Exception as e:
+        logging.warning(f"Could not load logo from {logo_url}: {str(e)}")
+        # Continue without logo if there's an error
     
     elements.append(Paragraph("AEROSPIN SESSION REPORT", styles['Header1']))
     elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Subheader']))
@@ -1030,6 +1035,7 @@ def generate_pdf(session_data):
     doc.build(elements)
     logging.info(f"PDF generated: {filename}")
     return filename
+
 async def handle_data(request):
     global data, history, device_state, data_received, session_data, gps_coords, vpn_info
     
