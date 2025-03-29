@@ -144,7 +144,8 @@ HTML_CONTENT = '''
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
-    <script async defer src="https://maps.googleapis.com/maps/api/js?key=''' + GOOGLE_API_KEY + '''&libraries=places,marker&v=weekly&callback=initMap"></script>
+    <!-- Google Maps API script without callback, using your API key -->
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDpCPfntL6CEXPoOVPf2RmfmCjfV7rfano&libraries=places,marker&v=weekly"></script>
     <style>
         :root {
             --primary: #4361ee;
@@ -620,7 +621,8 @@ HTML_CONTENT = '''
             map = new google.maps.Map(document.getElementById('map'), {
                 center: { lat: 20, lng: 54 },
                 zoom: 2,
-                mapTypeId: 'roadmap'
+                mapTypeId: 'roadmap',
+                mapId: '67926741dcbb2036'  // Replace with your actual Map ID from Google Cloud Console
             });
             isMapInitialized = true;
             console.log("Map initialized successfully");
@@ -671,7 +673,7 @@ HTML_CONTENT = '''
 
         document.addEventListener('DOMContentLoaded', function() {
             initCharts();
-            initMap();  // Ensure map initializes on load
+            initMap();  // Initialize map after DOM is loaded
             document.getElementById('submitSetup').addEventListener('click', submitSetup);
             document.getElementById('stopButton').addEventListener('click', stopSystem);
             document.getElementById('downloadPdf').addEventListener('click', downloadPdf);
