@@ -130,10 +130,9 @@ async def get_gps_from_ip(ip_address):
     except Exception as e:
         logging.error(f"Geolocation error for IP {ip_address}: {e}")
     
-    logging.warning(f"No valid geolocation data for IP: {ip_address}, using fallback coordinates")
-    return {"latitude": 37.7749, "longitude": -122.4194, "source": "fallback", "accuracy": 100000}
+    logging.warning(f"No valid geolocation data for IP: {ip_address}")
+    return {"latitude": None, "longitude": None, "source": None, "accuracy": None}
 
-# HTML content remains unchanged except for the fetchData() function, updated below
 HTML_CONTENT = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -145,8 +144,7 @@ HTML_CONTENT = '''
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
-    <!-- Google Maps API script without callback, using your API key -->
-    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDpCPfntL6CEXPoOVPf2RmfmCjfV7rfano&libraries=places,marker&v=weekly"></script>
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=''' + GOOGLE_API_KEY + '''&libraries=places,marker&v=weekly"></script>
     <style>
         :root {
             --primary: #4361ee;
@@ -614,24 +612,28 @@ HTML_CONTENT = '''
         }
 
         function initMap() {
-            if (!window.google || !window.google.maps) {
-                console.error("Google Maps API not loaded yet. Retrying in 1 second...");
-                setTimeout(initMap, 1000);
-                return;
-            }
             map = new google.maps.Map(document.getElementById('map'), {
                 center: { lat: 20, lng: 54 },
                 zoom: 2,
                 mapTypeId: 'roadmap',
-                mapId: '67926741dcbb2036'  // Replace with your actual Map ID from Google Cloud Console
+                mapId: '67926741dcbb2036'  // Replace with your Vector Map ID from Google Cloud Console
             });
             isMapInitialized = true;
             console.log("Map initialized successfully");
         }
 
+        function waitForGoogleMaps() {
+            if (window.google && window.google.maps) {
+                initMap();
+            } else {
+                console.log("Waiting for Google Maps API to load...");
+                setTimeout(waitForGoogleMaps, 500);
+            }
+        }
+
         function updateMap(latitude, longitude) {
-            if (!isMapInitialized || !window.google || !window.google.maps || !map) {
-                console.error("Map not initialized yet or Google Maps API not loaded. Retrying...");
+            if (!isMapInitialized || !map) {
+                console.error("Map not initialized yet. Retrying...");
                 setTimeout(() => updateMap(latitude, longitude), 1000);
                 return;
             }
@@ -674,7 +676,7 @@ HTML_CONTENT = '''
 
         document.addEventListener('DOMContentLoaded', function() {
             initCharts();
-            initMap();  // Initialize map after DOM is loaded
+            waitForGoogleMaps();
             document.getElementById('submitSetup').addEventListener('click', submitSetup);
             document.getElementById('stopButton').addEventListener('click', stopSystem);
             document.getElementById('downloadPdf').addEventListener('click', downloadPdf);
@@ -801,14 +803,12 @@ HTML_CONTENT = '''
                     
                     updateCharts(data);
 
-                    if (data.gps?.latitude && data.gps?.longitude) {
+                    if (data.gps?.latitude != null && data.gps?.longitude != null) {
                         console.log(`Arduino GPS data received: Lat ${data.gps.latitude}, Lon ${data.gps.longitude}`);
                         updateMap(data.gps.latitude, data.gps.longitude);
-                    } else if (!data.gps || (data.gps.latitude === null && data.gps.longitude === null)) {
-                        if (!fetchData.gpsWarned) {
-                            console.warn("No GPS data available; map will not update.");
-                            fetchData.gpsWarned = true;
-                        }
+                    } else if (!fetchData.gpsWarned) {
+                        console.warn("No GPS data available; map will not update.");
+                        fetchData.gpsWarned = true;
                     }
                 }
 
@@ -1040,7 +1040,7 @@ async def handle_data(request):
                     gps_coords = coords
                     logging.info(f"Updated GPS coords for {client_ip}: {gps_coords}")
                 else:
-                    logging.warning(f"Invalid IP {client_ip}, using existing GPS coords: {gps_coords}")
+                    logging.warning(f"Invalid IP {client_ip}, keeping existing GPS coords: {gps_coords}")
 
                 required_fields = ['temperature', 'humidity', 'speed', 'remaining']
                 if all(field in post_data for field in required_fields):
