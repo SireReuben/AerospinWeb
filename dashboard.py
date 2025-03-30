@@ -1391,6 +1391,14 @@ def generate_pdf(session_data):
     logging.info(f"PDF generated: {filename}")
     return filename
 
+async def handle_root(request):
+    return web.Response(
+        text=HTML_CONTENT,
+        content_type='text/html',
+        charset='utf-8'
+    )
+
+
 async def init_app():
     app = web.Application(middlewares=[cors_middleware, logging_middleware])
     app.router.add_get('/', handle_root)
