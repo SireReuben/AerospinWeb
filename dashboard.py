@@ -19,7 +19,7 @@ MAX_HISTORY = 20
 VALID_DEVICE_STATES = ["disconnected", "ready", "waiting", "running", "stopped"]
 VALID_AUTH_CODE_MIN = 100
 VALID_AUTH_CODE_MAX = 999
-GOOGLE_API_KEY = "AIzaSyDpCPfntL6CEXPoOVPf2RmfmCjfV7rfano"  # Replace with your real Google API key
+GOOGLE_API_KEY = "AIzaSyDpCPfntL6CEXPoOVPf2RmfmCjfV7rfano"
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -30,107 +30,7 @@ logging.basicConfig(
     ]
 )
 
-data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
-history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
-data_received = False
-device_state = "disconnected"
-session_data = []
-auth_code = None
-runtime = None
-gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": None}
-vpn_cache = TTLCache(maxsize=100, ttl=300)
-vpn_info = {"is_vpn": False, "confidence": 0, "details": "No data yet"}
-
-async def check_vpn(ip_address):
-    if ip_address in vpn_cache:
-        logging.debug(f"VPN status from cache for {ip_address}")
-        return vpn_cache[ip_address]
-    
-    vpn_indicators = []
-    confidence_score = 0
-    
-    try:
-        async with ClientSession() as session:
-            url = f"http://ip-api.com/json/{ip_address}?fields=status,message,proxy,hosting,org"
-            async with session.get(url, timeout=5) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    if data.get("status") == "success":
-                        if data.get("proxy", False):
-                            vpn_indicators.append("Proxy detected")
-                            confidence_score += 40
-                        if data.get("hosting", False):
-                            vpn_indicators.append("Hosting provider")
-                            confidence_score += 30
-                        org = data.get("org", "").lower()
-                        if any(keyword in org for keyword in ["vpn", "proxy", "cloud", "hosting"]):
-                            vpn_indicators.append(f"Org: {org}")
-                            confidence_score += 20
-
-        is_vpn = confidence_score >= 50
-        details = "; ".join(vpn_indicators) if vpn_indicators else "No VPN indicators"
-        vpn_info = {
-            "is_vpn": is_vpn,
-            "confidence": min(confidence_score, 100),
-            "details": f"{details} (Note: Detection is approximate)"
-        }
-        
-        vpn_cache[ip_address] = vpn_info
-        logging.info(f"VPN check for {ip_address}: {vpn_info}")
-        return vpn_info
-    except Exception as e:
-        logging.error(f"VPN check failed for {ip_address}: {e}")
-        vpn_info = {"is_vpn": False, "confidence": 0, "details": f"Check failed: {str(e)}"}
-        vpn_cache[ip_address] = vpn_info
-        return vpn_info
-
-async def get_gps_from_ip(ip_address):
-    logging.debug(f"Attempting IP geolocation for: {ip_address}")
-    try:
-        async with ClientSession() as session:
-            # Google Geolocation API
-            url = f"https://www.googleapis.com/geolocation/v1/geolocate?key={GOOGLE_API_KEY}"
-            payload = {"considerIp": True}
-            async with session.post(url, json=payload) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    accuracy = data.get("accuracy", 0)
-                    logging.info(f"Google Geolocation response: {data}")
-                    if accuracy < 50000:
-                        return {
-                            "latitude": data["location"]["lat"],
-                            "longitude": data["location"]["lng"],
-                            "source": "google_geolocation",
-                            "accuracy": accuracy
-                        }
-                    else:
-                        logging.debug(f"Google accuracy too low: {accuracy}")
-
-            # Fallback to ip-api.com
-            ip_url = f"http://ip-api.com/json/{ip_address}?fields=status,message,lat,lon"
-            async with session.get(ip_url) as response:
-                if response.status == 200:
-                    ip_data = await response.json()
-                    logging.info(f"IP-API response: {ip_data}")
-                    if ip_data.get("status") == "success":
-                        return {
-                            "latitude": ip_data["lat"],
-                            "longitude": ip_data["lon"],
-                            "source": "ip_api",
-                            "accuracy": 50000
-                        }
-                    else:
-                        logging.warning(f"IP-API failed: {ip_data.get('message', 'Unknown error')}")
-                else:
-                    logging.warning(f"IP-API request failed with status: {response.status}")
-    
-    except Exception as e:
-        logging.error(f"Geolocation error for IP {ip_address}: {e}")
-    
-    logging.warning(f"No valid geolocation data for IP: {ip_address}")
-    return {"latitude": None, "longitude": None, "source": None, "accuracy": None}
-
-# HTML content remains unchanged; omitted for brevity but should be identical to your original
+# HTML content would go here (same as before, but too long to include)
 HTML_CONTENT = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -419,6 +319,36 @@ HTML_CONTENT = '''
             visibility: visible;
             opacity: 1;
         }
+        .speed-control {
+            position: relative;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .speed-control:hover {
+            transform: scale(1.05);
+            color: var(--accent);
+        }
+        .speed-control.active {
+            color: var(--accent);
+            font-weight: bold;
+        }
+        .speed-control.disabled {
+            opacity: 0.7;
+            pointer-events: none;
+        }
+        .status-tooltip {
+            position: absolute;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 100;
+            display: none;
+        }
+        #speed:hover + .status-tooltip {
+            display: block;
+        }
         @media (max-width: 768px) {
             .metric-card, .chart-container {
                 margin-bottom: 15px;
@@ -450,6 +380,7 @@ HTML_CONTENT = '''
                     <div class="metric-card speed">
                         <div class="metric-title"><i class="ri-speed-line"></i> Speed</div>
                         <div id="speed" class="metric-value">0<span class="metric-unit">%</span></div>
+                        <div class="status-tooltip">Click to adjust speed (only available when running)</div>
                     </div>
                 </div>
                 <div class="col-md-3">
@@ -477,15 +408,7 @@ HTML_CONTENT = '''
                 <div class="col-md-4">
                     <div class="control-card">
                         <h4 class="mb-3">Control Panel</h4>
-                        <div class="mb-3">
-                            <label for="authCode" class="form-label">Auth Code (100-999)</label>
-                            <input type="number" id="authCode" min="100" max="999" class="form-control" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="runtime" class="form-label">Runtime (seconds)</label>
-                            <input type="number" id="runtime" min="1" class="form-control" required>
-                        </div>
-                        <button id="submitSetup" class="btn btn-primary w-100">Configure System</button>
+                        <button id="setupButton" class="btn btn-primary w-100">Setup System</button>
                         <button id="stopButton" class="btn btn-danger w-100 mt-2" style="display: none;">
                             <i class="ri-stop-circle-line"></i> Stop System
                         </button>
@@ -506,6 +429,85 @@ HTML_CONTENT = '''
             </div>
         </div>
     </div>
+
+    <!-- Speed Control Modal -->
+    <div class="modal fade" id="speedModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content" style="background: var(--card-bg); border: 1px solid var(--border);">
+                <div class="modal-header" style="border-bottom: 1px solid var(--border);">
+                    <h5 class="modal-title">Adjust Speed</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: invert(1);"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="speedSlider" class="form-label">Current Speed: <span id="speedValue">0</span>%</label>
+                        <input type="range" class="form-range" min="0" max="100" step="1" id="speedSlider">
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <button id="decreaseSpeed" class="btn btn-primary"><i class="ri-subtract-line"></i> 5%</button>
+                        <button id="increaseSpeed" class="btn btn-primary"><i class="ri-add-line"></i> 5%</button>
+                    </div>
+                </div>
+                <div class="modal-footer" style="border-top: 1px solid var(--border);">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" id="saveSpeed">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Authentication Modal -->
+    <div class="modal fade" id="authModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content" style="background: var(--card-bg); border: 1px solid var(--border);">
+                <div class="modal-header" style="border-bottom: 1px solid var(--border);">
+                    <h5 class="modal-title">Authentication Method</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: invert(1);"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="authMethod" id="codeAuth" checked>
+                            <label class="form-check-label" for="codeAuth">
+                                Code Authentication
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="authMethod" id="buttonAuth">
+                            <label class="form-check-label" for="buttonAuth">
+                                Button Authentication
+                            </label>
+                        </div>
+                    </div>
+                    <div id="codeAuthFields">
+                        <div class="mb-3">
+                            <label for="authCode" class="form-label">Auth Code (100-999)</label>
+                            <input type="number" id="authCode" min="100" max="999" class="form-control" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="runtime" class="form-label">Runtime (seconds)</label>
+                            <input type="number" id="runtime" min="1" class="form-control" required>
+                        </div>
+                    </div>
+                    <div id="buttonAuthFields" style="display: none;">
+                        <div class="alert alert-info">
+                            <i class="ri-information-line"></i> This will send a request to the device for approval
+                        </div>
+                        <div class="mb-3">
+                            <label for="buttonRuntime" class="form-label">Runtime (seconds)</label>
+                            <input type="number" id="buttonRuntime" min="1" class="form-control" required>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer" style="border-top: 1px solid var(--border);">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="submitAuth">Authenticate</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         let tempChart, humidChart, speedChart, remainingChart;
         let map, marker;
@@ -614,7 +616,7 @@ HTML_CONTENT = '''
                 center: { lat: 20, lng: 54 },
                 zoom: 2,
                 mapTypeId: 'roadmap',
-                mapId: '67926741dcbb2036'  // Replace with your Vector Map ID from Google Cloud Console
+                mapId: '67926741dcbb2036'
             });
             isMapInitialized = true;
             console.log("Map initialized successfully");
@@ -664,59 +666,292 @@ HTML_CONTENT = '''
 
         function updateSystemStatus(status, isActive = false) {
             const statusElement = document.getElementById('systemStatus');
+            const speedElement = document.getElementById('speed');
+            
             if (statusElement) {
                 statusElement.innerHTML = isActive ? 
                     '<i class="ri-checkbox-circle-line"></i> ' + status : 
                     '<i class="ri-focus-3-line"></i> ' + status;
                 statusElement.className = isActive ? 'status-badge active' : 'status-badge';
             }
+            
+            if (speedElement) {
+                if (status === 'running') {
+                    speedElement.classList.add('speed-control', 'active');
+                    speedElement.classList.remove('disabled');
+                    speedElement.title = 'Click to adjust speed';
+                } else {
+                    speedElement.classList.remove('speed-control', 'active');
+                    speedElement.classList.add('disabled');
+                    speedElement.title = '';
+                }
+            }
+        }
+
+        function updateConnectionStatus(connected) {
+            const statusIndicator = document.getElementById('connectionStatus');
+            if (statusIndicator) {
+                statusIndicator.className = connected ? 'connection-active' : 'connection-inactive';
+                statusIndicator.title = connected ? 'Connected to device' : 'Disconnected from device';
+            }
         }
 
         document.addEventListener('DOMContentLoaded', function() {
             initCharts();
             waitForGoogleMaps();
-            document.getElementById('submitSetup').addEventListener('click', submitSetup);
+            
+            const statusContainer = document.querySelector('.header');
+            if (statusContainer) {
+                const connectionIndicator = document.createElement('div');
+                connectionIndicator.id = 'connectionStatus';
+                connectionIndicator.className = 'connection-inactive';
+                connectionIndicator.style.marginLeft = '10px';
+                connectionIndicator.style.display = 'flex';
+                connectionIndicator.style.alignItems = 'center';
+                connectionIndicator.innerHTML = '<i class="ri-wifi-line"></i>';
+                statusContainer.appendChild(connectionIndicator);
+            }
+            
+            // Speed Control
+            const speedModal = new bootstrap.Modal(document.getElementById('speedModal'));
+            const speedSlider = document.getElementById('speedSlider');
+            const speedValue = document.getElementById('speedValue');
+            const saveSpeedBtn = document.getElementById('saveSpeed');
+            const increaseBtn = document.getElementById('increaseSpeed');
+            const decreaseBtn = document.getElementById('decreaseSpeed');
+            
+            document.getElementById('speed').addEventListener('click', function() {
+                speedSlider.value = parseInt(this.textContent);
+                speedValue.textContent = speedSlider.value;
+                speedModal.show();
+            });
+            
+            speedSlider.addEventListener('input', function() {
+                speedValue.textContent = this.value;
+            });
+            
+            increaseBtn.addEventListener('click', function() {
+                speedSlider.value = Math.min(100, parseInt(speedSlider.value) + 5);
+                speedValue.textContent = speedSlider.value;
+            });
+            
+            decreaseBtn.addEventListener('click', function() {
+                speedSlider.value = Math.max(0, parseInt(speedSlider.value) - 5);
+                speedValue.textContent = speedSlider.value;
+            });
+            
+            saveSpeedBtn.addEventListener('click', async function() {
+                const newSpeed = parseInt(speedSlider.value);
+                try {
+                    const response = await fetch('/speed', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ speed: newSpeed })
+                    });
+                    
+                    if (response.ok) {
+                        speedModal.hide();
+                        fetchData();
+                    } else {
+                        alert('Failed to update speed');
+                    }
+                } catch (error) {
+                    console.error('Error updating speed:', error);
+                    alert('Error updating speed');
+                }
+            });
+            
+            // Authentication
+            const authModal = new bootstrap.Modal(document.getElementById('authModal'));
+            const codeAuth = document.getElementById('codeAuth');
+            const buttonAuth = document.getElementById('buttonAuth');
+            const codeAuthFields = document.getElementById('codeAuthFields');
+            const buttonAuthFields = document.getElementById('buttonAuthFields');
+            const submitAuthBtn = document.getElementById('submitAuth');
+            
+            document.getElementById('setupButton').addEventListener('click', function() {
+                authModal.show();
+            });
+            
+            codeAuth.addEventListener('change', function() {
+                if (this.checked) {
+                    codeAuthFields.style.display = 'block';
+                    buttonAuthFields.style.display = 'none';
+                }
+            });
+            
+            buttonAuth.addEventListener('change', function() {
+                if (this.checked) {
+                    codeAuthFields.style.display = 'none';
+                    buttonAuthFields.style.display = 'block';
+                }
+            });
+            
+            submitAuthBtn.addEventListener('click', async function() {
+                const useButtonAuth = buttonAuth.checked;
+                
+                if (useButtonAuth) {
+                    const runtime = document.getElementById('buttonRuntime').value;
+                    if (!runtime || runtime < 1) {
+                        alert('Please enter a valid runtime');
+                        return;
+                    }
+                    
+                    try {
+                        const response = await fetch('/auth/request', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                type: 'button',
+                                runtime: parseInt(runtime)
+                            })
+                        });
+                        
+                        if (response.ok) {
+                            authModal.hide();
+                            updateSystemStatus('Waiting for device confirmation');
+                            const authCheck = setInterval(async () => {
+                                const statusResponse = await fetch('/data');
+                                const statusData = await statusResponse.json();
+                                if (statusData.state === 'running') {
+                                    clearInterval(authCheck);
+                                    fetchData();
+                                } else if (statusData.state === 'ready') {
+                                    clearInterval(authCheck);
+                                    alert('Authentication rejected by device');
+                                    fetchData();
+                                }
+                            }, 1000);
+                        } else {
+                            alert('Failed to send authentication request');
+                        }
+                    } catch (error) {
+                        console.error('Error with button auth:', error);
+                        alert('Error with button authentication');
+                    }
+                } else {
+                    const authCode = document.getElementById('authCode').value;
+                    const runtime = document.getElementById('runtime').value;
+                    
+                    if (!authCode || authCode < 100 || authCode > 999) {
+                        alert('Auth code must be between 100 and 999');
+                        return;
+                    }
+                    
+                    if (!runtime || runtime < 1) {
+                        alert('Runtime must be a positive number');
+                        return;
+                    }
+                    
+                    try {
+                        const response = await fetch('/setup', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                type: 'code',
+                                authCode: parseInt(authCode),
+                                runtime: parseInt(runtime)
+                            })
+                        });
+                        
+                        if (response.ok) {
+                            authModal.hide();
+                            updateSystemStatus('Waiting');
+                            document.getElementById('setupButton').disabled = true;
+                            fetchData();
+                        } else {
+                            alert('Setup failed');
+                        }
+                    } catch (error) {
+                        console.error('Error with code auth:', error);
+                        alert('Error with code authentication');
+                    }
+                }
+            });
+            
+            // Other controls
             document.getElementById('stopButton').addEventListener('click', stopSystem);
             document.getElementById('downloadPdf').addEventListener('click', downloadPdf);
             document.getElementById('startNewSession').addEventListener('click', startNewSession);
+            
             setInterval(fetchData, 1000);
         });
 
-        async function submitSetup() {
-            const authCode = parseInt(document.getElementById('authCode').value);
-            const runtime = parseInt(document.getElementById('runtime').value);
-            
-            if (isNaN(authCode) || authCode < 100 || authCode > 999) {
-                alert("Auth code must be between 100 and 999.");
-                return;
-            }
-            
-            if (isNaN(runtime) || runtime < 1) {
-                alert("Runtime must be a positive number.");
-                return;
-            }
-            
+        async function fetchData() {
             try {
-                const response = await fetch('/setup', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ authCode: authCode, runtime: runtime })
-                });
+                const response = await fetch('/data');
+                const data = await response.json();
+                console.log("Fetched data:", data);
+                const currentState = data.state;
+
+                updateSystemStatus(currentState.charAt(0).toUpperCase() + currentState.slice(1), 
+                                 currentState === 'running');
                 
-                const result = await response.json();
-                
-                if (result.status === 'waiting') {
-                    updateSystemStatus('Waiting');
-                    document.getElementById('submitSetup').disabled = true;
-                    fetchData();
+                if (data.data_received) {
+                    const tempElement = document.getElementById('temperature');
+                    const humidElement = document.getElementById('humidity');
+                    const speedElement = document.getElementById('speed');
+                    const remainElement = document.getElementById('remaining');
+                    if (tempElement) tempElement.innerHTML = `${data.temperature.toFixed(1)}<span class="metric-unit">°C</span>`;
+                    if (humidElement) humidElement.innerHTML = `${data.humidity.toFixed(1)}<span class="metric-unit">%</span>`;
+                    if (speedElement) speedElement.innerHTML = `${data.speed}<span class="metric-unit">%</span>`;
+                    if (remainElement) remainElement.innerHTML = `${data.remaining}<span class="metric-unit">s</span>`;
+                    
+                    const vpnStatus = document.getElementById('vpnStatus');
+                    const vpnDetails = document.getElementById('vpnDetails');
+                    if (data.vpn_info && vpnStatus && vpnDetails) {
+                        vpnStatus.innerHTML = data.vpn_info.is_vpn ? 
+                            `<span style="color: #f72585">Active (${data.vpn_info.confidence}%)</span>` : 
+                            `<span style="color: #4ade80">Inactive (${data.vpn_info.confidence}%)</span>`;
+                        vpnDetails.textContent = data.vpn_info.details;
+                    }
+                    
+                    updateCharts(data);
+                    updateConnectionStatus(true);
+
+                    if (data.gps?.latitude != null && data.gps?.longitude != null) {
+                        console.log(`Arduino GPS data received: Lat ${data.gps.latitude}, Lon ${data.gps.longitude}`);
+                        updateMap(data.gps.latitude, data.gps.longitude);
+                    } else if (!fetchData.gpsWarned) {
+                        console.warn("No GPS data available; map will not update.");
+                        fetchData.gpsWarned = true;
+                    }
                 } else {
-                    alert("Setup failed: " + result.error);
+                    updateConnectionStatus(false);
                 }
+
+                if (currentState === 'disconnected') {
+                    const tempElement = document.getElementById('temperature');
+                    const humidElement = document.getElementById('humidity');
+                    const speedElement = document.getElementById('speed');
+                    const remainElement = document.getElementById('remaining');
+                    if (tempElement) tempElement.innerHTML = `0<span class="metric-unit">°C</span>`;
+                    if (humidElement) humidElement.innerHTML = `0<span class="metric-unit">%</span>`;
+                    if (speedElement) speedElement.innerHTML = `0<span class="metric-unit">%</span>`;
+                    if (remainElement) remainElement.innerHTML = `0<span class="metric-unit">s</span>`;
+                    resetCharts();
+                    fetchData.gpsWarned = false;
+                }
+
+                const stopButton = document.getElementById('stopButton');
+                const downloadButton = document.getElementById('downloadPdf');
+                const newSessionButton = document.getElementById('startNewSession');
+                if (stopButton) stopButton.style.display = 
+                    (currentState === 'running' || currentState === 'waiting' || currentState === 'ready') ? 'block' : 'none';
+                if (downloadButton) downloadButton.style.display = 
+                    (currentState === 'stopped' && data.history.timestamps.length > 0) ? 'block' : 'none';
+                if (newSessionButton) newSessionButton.style.display = 
+                    (currentState === 'stopped' && data.history.timestamps.length > 0) ? 'block' : 'none';
+
+                previousState = currentState;
+
             } catch (error) {
-                console.error('Error submitting setup:', error);
-                alert('Failed to submit setup.');
+                console.error('Error fetching data:', error);
+                updateSystemStatus('Connection Error');
+                updateConnectionStatus(false);
             }
         }
+        fetchData.gpsWarned = false;
 
         async function stopSystem() {
             try {
@@ -760,7 +995,7 @@ HTML_CONTENT = '''
                     method: 'POST'
                 });
                 if (response.ok) {
-                    document.getElementById('submitSetup').disabled = false;
+                    document.getElementById('setupButton').disabled = false;
                     fetchData();
                 } else {
                     alert('Failed to start new session.');
@@ -770,82 +1005,96 @@ HTML_CONTENT = '''
                 alert('Failed to start new session.');
             }
         }
-
-        async function fetchData() {
-            try {
-                const response = await fetch('/data');
-                const data = await response.json();
-                console.log("Fetched data:", data);
-                const currentState = data.state;
-
-                updateSystemStatus(currentState.charAt(0).toUpperCase() + currentState.slice(1), currentState === 'running');
-                
-                if (data.data_received) {
-                    const tempElement = document.getElementById('temperature');
-                    const humidElement = document.getElementById('humidity');
-                    const speedElement = document.getElementById('speed');
-                    const remainElement = document.getElementById('remaining');
-                    if (tempElement) tempElement.innerHTML = `${data.temperature.toFixed(1)}<span class="metric-unit">°C</span>`;
-                    if (humidElement) humidElement.innerHTML = `${data.humidity.toFixed(1)}<span class="metric-unit">%</span>`;
-                    if (speedElement) speedElement.innerHTML = `${data.speed}<span class="metric-unit">%</span>`;
-                    if (remainElement) remainElement.innerHTML = `${data.remaining}<span class="metric-unit">s</span>`;
-                    
-                    const vpnStatus = document.getElementById('vpnStatus');
-                    const vpnDetails = document.getElementById('vpnDetails');
-                    if (data.vpn_info && vpnStatus && vpnDetails) {
-                        vpnStatus.innerHTML = data.vpn_info.is_vpn ? 
-                            `<span style="color: #f72585">Active (${data.vpn_info.confidence}%)</span>` : 
-                            `<span style="color: #4ade80">Inactive (${data.vpn_info.confidence}%)</span>`;
-                        vpnDetails.textContent = data.vpn_info.details;
-                    }
-                    
-                    updateCharts(data);
-
-                    if (data.gps?.latitude != null && data.gps?.longitude != null) {
-                        console.log(`Arduino GPS data received: Lat ${data.gps.latitude}, Lon ${data.gps.longitude}`);
-                        updateMap(data.gps.latitude, data.gps.longitude);
-                    } else if (!fetchData.gpsWarned) {
-                        console.warn("No GPS data available; map will not update.");
-                        fetchData.gpsWarned = true;
-                    }
-                }
-
-                if (currentState === 'disconnected') {
-                    const tempElement = document.getElementById('temperature');
-                    const humidElement = document.getElementById('humidity');
-                    const speedElement = document.getElementById('speed');
-                    const remainElement = document.getElementById('remaining');
-                    if (tempElement) tempElement.innerHTML = `0<span class="metric-unit">°C</span>`;
-                    if (humidElement) humidElement.innerHTML = `0<span class="metric-unit">%</span>`;
-                    if (speedElement) speedElement.innerHTML = `0<span class="metric-unit">%</span>`;
-                    if (remainElement) remainElement.innerHTML = `0<span class="metric-unit">s</span>`;
-                    resetCharts();
-                    fetchData.gpsWarned = false;
-                }
-
-                const stopButton = document.getElementById('stopButton');
-                const downloadButton = document.getElementById('downloadPdf');
-                const newSessionButton = document.getElementById('startNewSession');
-                if (stopButton) stopButton.style.display = 
-                    (currentState === 'running' || currentState === 'waiting' || currentState === 'ready') ? 'block' : 'none';
-                if (downloadButton) downloadButton.style.display = 
-                    (currentState === 'stopped' && data.history.timestamps.length > 0) ? 'block' : 'none';
-                if (newSessionButton) newSessionButton.style.display = 
-                    (currentState === 'stopped' && data.history.timestamps.length > 0) ? 'block' : 'none';
-
-                previousState = currentState;
-
-            } catch (error) {
-                console.error('Error fetching data:', error);
-                updateSystemStatus('Connection Error');
-            }
-        }
-        fetchData.gpsWarned = false;
-
     </script>
 </body>
 </html>
 '''
+
+# Global state
+data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
+history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
+data_received = False
+device_state = "disconnected"
+session_data = []
+auth_code = None
+runtime = None
+gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": None}
+vpn_cache = TTLCache(maxsize=100, ttl=300)
+vpn_info = {"is_vpn": False, "confidence": 0, "details": "No data yet"}
+pending_auth = False
+last_speed_update = None
+
+async def check_vpn(ip_address):
+    if ip_address in vpn_cache:
+        return vpn_cache[ip_address]
+    
+    vpn_indicators = []
+    confidence_score = 0
+    
+    try:
+        async with ClientSession() as session:
+            url = f"http://ip-api.com/json/{ip_address}?fields=status,message,proxy,hosting,org"
+            async with session.get(url, timeout=5) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get("status") == "success":
+                        if data.get("proxy", False):
+                            vpn_indicators.append("Proxy detected")
+                            confidence_score += 40
+                        if data.get("hosting", False):
+                            vpn_indicators.append("Hosting provider")
+                            confidence_score += 30
+                        org = data.get("org", "").lower()
+                        if any(keyword in org for keyword in ["vpn", "proxy", "cloud", "hosting"]):
+                            vpn_indicators.append(f"Org: {org}")
+                            confidence_score += 20
+
+        is_vpn = confidence_score >= 50
+        details = "; ".join(vpn_indicators) if vpn_indicators else "No VPN indicators"
+        vpn_info = {
+            "is_vpn": is_vpn,
+            "confidence": min(confidence_score, 100),
+            "details": f"{details} (Note: Detection is approximate)"
+        }
+        
+        vpn_cache[ip_address] = vpn_info
+        return vpn_info
+    except Exception as e:
+        return {"is_vpn": False, "confidence": 0, "details": f"Check failed: {str(e)}"}
+
+async def get_gps_from_ip(ip_address):
+    try:
+        async with ClientSession() as session:
+            url = f"https://www.googleapis.com/geolocation/v1/geolocate?key={GOOGLE_API_KEY}"
+            payload = {"considerIp": True}
+            async with session.post(url, json=payload) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    accuracy = data.get("accuracy", 0)
+                    if accuracy < 50000:
+                        return {
+                            "latitude": data["location"]["lat"],
+                            "longitude": data["location"]["lng"],
+                            "source": "google_geolocation",
+                            "accuracy": accuracy
+                        }
+
+            ip_url = f"http://ip-api.com/json/{ip_address}?fields=status,message,lat,lon"
+            async with session.get(ip_url) as response:
+                if response.status == 200:
+                    ip_data = await response.json()
+                    if ip_data.get("status") == "success":
+                        return {
+                            "latitude": ip_data["lat"],
+                            "longitude": ip_data["lon"],
+                            "source": "ip_api",
+                            "accuracy": 50000
+                        }
+    
+    except Exception as e:
+        logging.error(f"Geolocation error: {e}")
+    
+    return {"latitude": None, "longitude": None, "source": None, "accuracy": None}
 
 def generate_pdf(session_data):
     filename = f"aerospin_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
@@ -853,8 +1102,10 @@ def generate_pdf(session_data):
     styles = getSampleStyleSheet()
     elements = []
 
+    # Title and metadata
     elements.append(Paragraph("Aerospin Session Report", styles['Title']))
     elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+    
     if gps_coords["latitude"] and gps_coords["longitude"]:
         elements.append(Paragraph(
             f"Device Location: Lat {gps_coords['latitude']:.6f}, Lon {gps_coords['longitude']:.6f} "
@@ -868,12 +1119,14 @@ def generate_pdf(session_data):
         doc.build(elements)
         return filename
 
+    # Data processing
     timestamps = [entry["timestamp"] for entry in session_data]
     temperatures = [entry["temperature"] for entry in session_data]
     humidities = [entry["humidity"] for entry in session_data]
     speeds = [entry["speed"] for entry in session_data]
     remainings = [entry["remaining"] for entry in session_data]
 
+    # Summary table
     summary_data = [
         ["Metric", "Minimum", "Maximum", "Average"],
         ["Temperature (°C)", f"{min(temperatures):.1f}", f"{max(temperatures):.1f}", f"{np.mean(temperatures):.1f}"],
@@ -896,6 +1149,7 @@ def generate_pdf(session_data):
     elements.append(summary_table)
     elements.append(Spacer(1, 12))
 
+    # Charts
     plt.figure(figsize=(10, 8))
     plt.subplot(4, 1, 1)
     plt.plot(timestamps, temperatures, label='Temperature', color='red')
@@ -938,7 +1192,8 @@ def generate_pdf(session_data):
     elements.append(plt_img)
     plt.close()
 
-    table_data = [["Timestamp", "Temperature (°C)", "Humidity (%)", "Speed (%)", "Time Remaining (s)", "Latitude", "Longitude"]]
+    # Detailed data table
+    table_data = [["Timestamp", "Temp (°C)", "Humidity (%)", "Speed (%)", "Remaining (s)", "Latitude", "Longitude"]]
     for entry in session_data:
         table_data.append([
             entry["timestamp"],
@@ -967,151 +1222,114 @@ def generate_pdf(session_data):
     elements.append(table)
 
     doc.build(elements)
-    logging.info(f"PDF generated: {filename}")
     return filename
 
 async def handle_data(request):
-    global data, history, device_state, data_received, session_data, gps_coords, vpn_info
+    global data, history, device_state, data_received, session_data, gps_coords, vpn_info, last_speed_update
     
     if request.method == "OPTIONS":
-        return web.Response(
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type",
-            }
-        )
+        return web.Response(headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+        })
 
     if request.method == "POST":
         try:
             post_data = await request.json()
             status = post_data.get("status")
-            # Use the public IP provided by Arduino if available
             public_ip = post_data.get("public_ip")
-            if public_ip and public_ip != "Unknown":
-                client_ip = public_ip
-            else:
-                client_ip = request.remote
+            client_ip = public_ip if public_ip and public_ip != "Unknown" else request.remote
             
-            logging.debug(f"Received POST data from IP {client_ip}: {post_data}")
-
             vpn_info = await check_vpn(client_ip)
 
             if status == "arduino_ready":
                 if device_state == "disconnected":
                     device_state = "ready"
-                    logging.info(f"Arduino detected at {client_ip}, state transitioned to: {device_state}")
-                return web.json_response(
-                    {"status": "ready", "state": device_state},
-                    headers={"Access-Control-Allow-Origin": "*"}
-                )
+                return web.json_response({"status": "ready", "state": device_state},
+                    headers={"Access-Control-Allow-Origin": "*"})
             
             elif status == "check_auth":
-                if auth_code is not None and runtime is not None:
-                    logging.info(f"Sending auth_code: {auth_code}, runtime: {runtime} to {client_ip}")
+                if pending_auth:
+                    return web.json_response({"status": "auth_pending", "state": device_state},
+                        headers={"Access-Control-Allow-Origin": "*"})
+                elif auth_code is not None:
                     return web.json_response({
                         "status": "auth_code",
                         "code": auth_code,
                         "runtime": runtime,
                         "state": device_state
-                    },
+                    }, headers={"Access-Control-Allow-Origin": "*"})
+                return web.json_response({"status": "waiting", "state": device_state},
                     headers={"Access-Control-Allow-Origin": "*"})
-                logging.debug(f"No auth code yet for {client_ip}, state: {device_state}")
-                return web.json_response(
-                    {"status": "waiting", "state": device_state},
-                    headers={"Access-Control-Allow-Origin": "*"}
-                )
             
             elif status == "start":
                 device_state = "running"
-                logging.info(f"State transitioned to: {device_state} for {client_ip}")
-                return web.json_response(
-                    {"status": "running", "state": device_state},
-                    headers={"Access-Control-Allow-Origin": "*"}
-                )
+                pending_auth = False
+                return web.json_response({"status": "running", "state": device_state},
+                    headers={"Access-Control-Allow-Origin": "*"})
             
             elif status == "stopped":
                 device_state = "stopped"
-                logging.info(f"State transitioned to: {device_state} for {client_ip}")
-                return web.json_response(
-                    {"status": "stopped", "state": device_state},
-                    headers={"Access-Control-Allow-Origin": "*"}
-                )
+                return web.json_response({"status": "stopped", "state": device_state},
+                    headers={"Access-Control-Allow-Origin": "*"})
             
             elif status == "data":
-                # Get coordinates using the client's public IP
                 coords = await get_gps_from_ip(client_ip)
                 gps_coords = coords
-                logging.info(f"Updated GPS coords for {client_ip}: {gps_coords}")
 
-                required_fields = ['temperature', 'humidity', 'speed', 'remaining']
-                if all(field in post_data for field in required_fields):
-                    if not (isinstance(post_data["temperature"], (int, float)) and 
-                            isinstance(post_data["humidity"], (int, float)) and 
-                            isinstance(post_data["speed"], int) and 
-                            isinstance(post_data["remaining"], int)):
-                        logging.warning(f"Invalid data types in POST data from {client_ip}")
-                        return web.json_response(
-                            {"error": "Invalid data types"}, 
-                            status=400,
-                            headers={"Access-Control-Allow-Origin": "*"}
-                        )
-
+                if all(field in post_data for field in ['temperature', 'humidity', 'speed', 'remaining']):
                     data_received = True
                     device_state = "running"
-                    logging.info(f"Arduino data received from {client_ip}, state transitioned to: {device_state}")
                     
-                    data.update({field: post_data[field] for field in required_fields})
+                    current_time = datetime.datetime.now()
+                    if (last_speed_update is None or 
+                        (current_time - last_speed_update).total_seconds() > 1 or
+                        abs(data["speed"] - post_data["speed"]) > 5):
+                        data["speed"] = post_data["speed"]
+                        last_speed_update = current_time
+                    
+                    data.update({
+                        "temperature": post_data["temperature"],
+                        "humidity": post_data["humidity"],
+                        "remaining": post_data["remaining"]
+                    })
                     
                     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
                     session_record = {
                         "timestamp": timestamp,
-                        **{k: post_data[k] for k in required_fields},
+                        "temperature": post_data["temperature"],
+                        "humidity": post_data["humidity"],
+                        "speed": post_data["speed"],
+                        "remaining": post_data["remaining"],
                         **gps_coords
                     }
                     session_data.append(session_record)
                     
-                    for key in data:
-                        history[key].append(data[key])
+                    for key in ["temperature", "humidity", "speed", "remaining"]:
+                        history[key].append(post_data[key])
                         history[key] = history[key][-MAX_HISTORY:]
                     history["timestamps"].append(timestamp)
                     history["timestamps"] = history["timestamps"][-MAX_HISTORY:]
                     
-                    logging.debug(f"Updated history: {history}")
-                    
-                    return web.json_response(
-                        {
-                            "status": "success", 
-                            "state": device_state,
-                            "gps": gps_coords,
-                            "vpn_info": vpn_info
-                        },
-                        headers={"Access-Control-Allow-Origin": "*"}
-                    )
+                    return web.json_response({
+                        "status": "success", 
+                        "state": device_state,
+                        "gps": gps_coords,
+                        "vpn_info": vpn_info
+                    }, headers={"Access-Control-Allow-Origin": "*"})
                 
-                logging.warning(f"Missing fields in POST data from {client_ip}")
-                return web.json_response(
-                    {"error": "Missing required fields"}, 
-                    status=400,
-                    headers={"Access-Control-Allow-Origin": "*"}
-                )
+                return web.json_response({"error": "Missing required fields"}, status=400,
+                    headers={"Access-Control-Allow-Origin": "*"})
                 
         except json.JSONDecodeError:
-            logging.error(f"Invalid JSON received from {request.remote}")
-            return web.json_response(
-                {"error": "Invalid JSON"}, 
-                status=400,
-                headers={"Access-Control-Allow-Origin": "*"}
-            )
+            return web.json_response({"error": "Invalid JSON"}, status=400,
+                headers={"Access-Control-Allow-Origin": "*"})
         except Exception as e:
-            logging.error(f"Error processing data from {request.remote}: {e}")
-            return web.json_response(
-                {"error": "Internal server error"}, 
-                status=500,
-                headers={"Access-Control-Allow-Origin": "*"}
-            )
+            logging.error(f"Error processing data: {e}")
+            return web.json_response({"error": "Internal server error"}, status=500,
+                headers={"Access-Control-Allow-Origin": "*"})
     
-    logging.debug(f"GET request received from {request.remote}, current state: {device_state}")
     return web.json_response({
         "state": device_state,
         "temperature": data["temperature"],
@@ -1122,32 +1340,66 @@ async def handle_data(request):
         "history": history,
         "gps": gps_coords,
         "vpn_info": vpn_info
-    },
-    headers={"Access-Control-Allow-Origin": "*"})
+    }, headers={"Access-Control-Allow-Origin": "*"})
 
 async def handle_setup(request):
-    global auth_code, runtime, device_state
+    global auth_code, runtime, device_state, pending_auth
     
     try:
         post_data = await request.json()
-        logging.debug(f"Received setup data: {post_data}")
+        auth_type = post_data.get("type")
         
-        auth_code = post_data.get("authCode")
-        runtime = post_data.get("runtime")
-        
-        if not (isinstance(auth_code, int) and VALID_AUTH_CODE_MIN <= auth_code <= VALID_AUTH_CODE_MAX) or not (isinstance(runtime, int) and runtime > 0):
-            logging.warning(f"Invalid setup data - authCode: {auth_code}, runtime: {runtime}")
-            return web.json_response({"error": f"Auth code must be between {VALID_AUTH_CODE_MIN} and {VALID_AUTH_CODE_MAX}"}, status=400)
+        if auth_type == "button":
+            runtime = post_data.get("runtime")
+            if not runtime or runtime < 1:
+                return web.json_response({"error": "Invalid runtime"}, status=400)
+            device_state = "waiting"
+            pending_auth = True
+            return web.json_response({
+                "status": "auth_pending",
+                "state": device_state,
+                "runtime": runtime
+            })
+        else:
+            auth_code = post_data.get("authCode")
+            runtime = post_data.get("runtime")
             
-        device_state = "waiting"
-        logging.info(f"Setup complete - Auth Code: {auth_code}, Runtime: {runtime}, State: {device_state}")
-        return web.json_response({"status": "waiting", "state": device_state})
-        
-    except json.JSONDecodeError:
-        logging.error("Invalid JSON in setup request")
-        return web.json_response({"error": "Invalid JSON"}, status=400)
+            if not (isinstance(auth_code, int) and VALID_AUTH_CODE_MIN <= auth_code <= VALID_AUTH_CODE_MAX):
+                return web.json_response(
+                    {"error": f"Auth code must be between {VALID_AUTH_CODE_MIN} and {VALID_AUTH_CODE_MAX}"},
+                    status=400)
+                
+            device_state = "waiting"
+            return web.json_response({
+                "status": "auth_code",
+                "state": device_state
+            })
+            
     except Exception as e:
-        logging.error(f"Error in setup: {e}")
+        logging.error(f"Setup error: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+async def handle_speed(request):
+    global data, history
+    
+    try:
+        post_data = await request.json()
+        new_speed = post_data.get("speed")
+        
+        if new_speed is None or not isinstance(new_speed, int) or new_speed < 0 or new_speed > 100:
+            return web.json_response({"error": "Invalid speed value (0-100)"}, status=400)
+            
+        data["speed"] = new_speed
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        history["speed"].append(new_speed)
+        history["speed"] = history["speed"][-MAX_HISTORY:]
+        history["timestamps"].append(timestamp)
+        history["timestamps"] = history["timestamps"][-MAX_HISTORY:]
+        
+        return web.json_response({"status": "success", "speed": new_speed})
+        
+    except Exception as e:
+        logging.error(f"Speed update error: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_stop(request):
@@ -1162,7 +1414,6 @@ async def handle_stop(request):
         data_received = False
         gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": None}
         vpn_info = {"is_vpn": False, "confidence": 0, "details": "No data yet"}
-        logging.info(f"System stopped, state and metrics reset - State: {device_state}")
         return web.json_response({"status": "stopped", "state": device_state})
         
     except Exception as e:
@@ -1182,7 +1433,6 @@ async def handle_reset(request):
         data_received = False
         gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": None}
         vpn_info = {"is_vpn": False, "confidence": 0, "details": "No data yet"}
-        logging.info(f"System reset for new session - State: {device_state}")
         return web.json_response({"status": "disconnected", "state": device_state})
         
     except Exception as e:
@@ -1194,19 +1444,16 @@ async def handle_pdf_download(request):
     
     try:
         if not session_data:
-            logging.warning("No session data available for PDF download")
             return web.json_response({"error": "No session data available"}, status=404)
             
         pdf_filename = generate_pdf(session_data)
-        response = web.FileResponse(pdf_filename)
-        return response
+        return web.FileResponse(pdf_filename)
         
     except Exception as e:
         logging.error(f"Error serving PDF: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_root(request):
-    logging.debug("Root endpoint accessed")
     return web.Response(text=HTML_CONTENT, content_type='text/html')
 
 async def init_app():
@@ -1217,22 +1464,18 @@ async def init_app():
     app.router.add_post('/stop', handle_stop)
     app.router.add_post('/reset', handle_reset)
     app.router.add_get('/download_pdf', handle_pdf_download)
+    app.router.add_post('/speed', handle_speed)
     return app
 
 async def main():
-    try:
-        app = await init_app()
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', PORT)
-        await site.start()
-        logging.info(f"Server started at http://0.0.0.0:{PORT}")
-        while True:
-            await asyncio.sleep(3600)
-    except Exception as e:
-        logging.error(f"Server error: {e}")
-    finally:
-        await runner.cleanup()
+    app = await init_app()
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+    logging.info(f"Server started at http://0.0.0.0:{PORT}")
+    while True:
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
     asyncio.run(main())
