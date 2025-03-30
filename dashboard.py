@@ -7,14 +7,11 @@ import datetime
 import matplotlib.pyplot as plt
 import numpy as np
 import io
-import seaborn  # New import for Matplotlib styling
-from urllib.request import urlopen  # New import for fetching logo
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4  # Changed from 'letter' to 'A4'
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle  # Added ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT  # New import for text alignment
-from reportlab.lib.units import inch  # New import for precise measurements
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak  # Added PageBreak
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.lib.styles import getSampleStyleSheet
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from cachetools import TTLCache
 
 PORT = int(os.environ.get("PORT", 10000))
@@ -849,19 +846,6 @@ HTML_CONTENT = '''
 </body>
 </html>
 '''
-
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-from reportlab.lib.units import inch
-from io import BytesIO
-import datetime
-import matplotlib.pyplot as plt
-import numpy as np
-from urllib.request import urlopen
-import logging
 
 def generate_pdf(session_data):
     filename = f"aerospin_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
