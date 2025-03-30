@@ -1152,7 +1152,7 @@ async def handle_setup(request):
             with state_lock:
                 shared_state["auth_data"]["code"] = None
                 shared_state["auth_data"]["runtime"] = runtime
-                shared_state["auth_data"]["expires"] = datetime.datetime.now() + datetime.timedelta(minutes=AUTH_TIMEOUT_MINUTES)
+                shared_state["auth_data"]["expires"] = datetime.now() + timedelta(minutes=AUTH_TIMEOUT_MINUTES)
             set_device_state("waiting")
             return web.json_response({"status": "waiting"})
 
@@ -1175,30 +1175,29 @@ async def handle_debug(request):
     return web.json_response(debug_info)
 
 async def handle_yesno(request):
-    global device_state, yes_no_auth
     try:
         post_data = await request.json()
-        if yes_no_auth and post_data.get("confirm"):
-            device_state = "running"
-            yes_no_auth = False
-            speed = post_data.get("speed", data["speed"])
-            logging.info(f"Yes/No confirmed, starting with speed: {speed}")
-            return web.json_response({"status": "start", "state": device_state, "speed": speed})
-        return web.json_response({"status": "waiting", "state": device_state})
+        confirm = post_data.get("confirm", False)
+        
+        with state_lock:
+            current_state = shared_state["device_state"]
+            if current_state == "waiting" and confirm:
+                if set_device_state("running"):
+                    # Update any necessary data here
+                    return web.json_response({"status": "start", "state": "running"})
+            return web.json_response({"status": "waiting", "state": current_state})
     except Exception as e:
         logging.error(f"Error in Yes/No handling: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_stop(request):
-    global device_state, session_data, auth_code, runtime, data, history, data_received, gps_coords, vpn_info
-    
     try:
-        device_state = "restarting"
-        logging.info(f"Sending restart command to Arduino - State: {device_state}")
-        return web.json_response({"status": "restart", "state": device_state})
-        
+        if set_device_state("restarting"):
+            logging.info("Sending restart command")
+            return web.json_response({"status": "restart", "state": "restarting"})
+        return web.json_response({"error": "Invalid state transition"}, status=400)
     except Exception as e:
-        logging.error(f"Error sending restart command: {e}")
+        logging.error(f"Stop error: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_speed(request):
