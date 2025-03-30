@@ -934,9 +934,9 @@ async def cors_middleware(app, handler):
 
 async def logging_middleware(app, handler):
     async def middleware(request):
-        start = datetime.datetime.now()
+        start = datetime.now()  # Corrected line
         response = await handler(request)
-        duration = (datetime.datetime.now() - start).total_seconds()
+        duration = (datetime.now() - start).total_seconds()  # Corrected line
         
         logging.info(f"{request.method} {request.path} - {response.status} - {duration:.2f}s")
         return response
@@ -966,7 +966,7 @@ def get_auth_status():
     with state_lock:
         return (
             shared_state["auth_data"]["code"] and 
-            datetime.datetime.now() < shared_state["auth_data"]["expires"]
+            datetime.now() < shared_state["auth_data"]["expires"]  # Corrected line
         )
 
 async def check_vpn(ip_address):
@@ -1097,7 +1097,7 @@ async def handle_data(request):
                             shared_state["operational_data"][field] = post_data[field]
                             update_operational_data(field, post_data[field])
                     
-                    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+                    timestamp = datetime.now().strftime("%H:%M:%S")  # Corrected line
                     update_operational_data("timestamps", timestamp)
                     
                     # GPS handling
@@ -1143,7 +1143,7 @@ async def handle_setup(request):
                 with state_lock:
                     shared_state["auth_data"]["code"] = auth_code
                     shared_state["auth_data"]["runtime"] = runtime
-                    shared_state["auth_data"]["expires"] = datetime.datetime.now() + datetime.timedelta(minutes=AUTH_TIMEOUT_MINUTES)
+                    shared_state["auth_data"]["expires"] = datetime.now() + timedelta(minutes=AUTH_TIMEOUT_MINUTES)  # Corrected line
                 set_device_state("waiting")
                 return web.json_response({"status": "waiting"})
             return web.json_response({"error": "invalid_code"}, status=400)
@@ -1269,7 +1269,7 @@ async def handle_download_pdf(request):
 
 
 def generate_pdf(session_data):
-    filename = f"aerospin_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    filename = f"aerospin_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
     doc = SimpleDocTemplate(filename, pagesize=letter)
     styles = getSampleStyleSheet()
     elements = []
