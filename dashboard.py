@@ -1162,7 +1162,7 @@ async def handle_data(request):
                     headers={"Access-Control-Allow-Origin": "*"}
                 )
             
-                        elif status == "stopped":
+            elif status == "stopped":
                 device_state = "stopped"
                 logging.info(f"State transitioned to: {device_state} for {client_ip}")
                 return web.json_response(
