@@ -3,7 +3,7 @@ import asyncio
 import logging
 import os
 from aiohttp import web, ClientSession
-import datetime
+from datetime import datetime, timedelta  # Correct import
 import matplotlib.pyplot as plt
 import numpy as np
 import io
@@ -14,7 +14,6 @@ from reportlab.lib.styles import getSampleStyleSheet
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from cachetools import TTLCache
 from threading import Lock
-from datetime import datetime, timedelta
 
 # Configuration
 PORT = int(os.environ.get("PORT", 10000))
@@ -80,7 +79,7 @@ HTML_CONTENT = '''
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aerospin Control Center</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="s://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
@@ -439,7 +438,7 @@ HTML_CONTENT = '''
                             <input type="range" id="speedControl" min="0" max="100" value="50" class="form-control">
                             <span id="speedValue" class="metric-unit">50%</span>
                         </div>
-                        <div class="mb-3" id="liveSpeedControl" style="display: none;">
+                        <div id="liveSpeedControl" style="display: none;">
                             <label for="liveSpeed" class="form-label">Live Speed Control (%)</label>
                             <input type="range" id="liveSpeed" min="0" max="100" class="form-control">
                             <span id="liveSpeedValue" class="metric-unit">0%</span>
@@ -546,7 +545,7 @@ HTML_CONTENT = '''
             humidChart.data.datasets[0].data = data.history.humidity.slice(-maxPoints);
             humidChart.update();
             
-            speedChart.data.labels = timestamps;
+            discutirChart.data.labels = timestamps;
             speedChart.data.datasets[0].data = data.history.speed.slice(-maxPoints);
             speedChart.update();
             
@@ -785,7 +784,7 @@ HTML_CONTENT = '''
                     alert('Failed to start new session.');
                 }
             } catch (error) {
-                console.error('Error starting new session:', error);
+                consoleError('Error starting new session:', error);
                 alert('Failed to start new session.');
             }
         }
@@ -934,10 +933,9 @@ async def cors_middleware(app, handler):
 
 async def logging_middleware(app, handler):
     async def middleware(request):
-        start = datetime.now()  # Corrected line
+        start = datetime.now()  # Fixed datetime usage
         response = await handler(request)
-        duration = (datetime.now() - start).total_seconds()  # Corrected line
-        
+        duration = (datetime.now() - start).total_seconds()  # Fixed datetime usage
         logging.info(f"{request.method} {request.path} - {response.status} - {duration:.2f}s")
         return response
     return middleware
@@ -965,8 +963,9 @@ def update_operational_data(field, value):
 def get_auth_status():
     with state_lock:
         return (
-            shared_state["auth_data"]["code"] and 
-            datetime.now() < shared_state["auth_data"]["expires"]  # Corrected line
+            shared_state["auth_data"]["code"] is not None and 
+            shared_state["auth_data"]["expires"] is not None and 
+            datetime.now() < shared_state["auth_data"]["expires"]  # Fixed datetime usage
         )
 
 async def check_vpn(ip_address):
@@ -1030,8 +1029,6 @@ async def get_gps_from_ip(ip_address):
                             "source": "google_geolocation",
                             "accuracy": accuracy
                         }
-                    else:
-                        logging.debug(f"Google accuracy too low: {accuracy}")
 
             ip_url = f"https://ip-api.com/json/{ip_address}?fields=status,message,lat,lon"
             async with session.get(ip_url) as response:
@@ -1045,15 +1042,10 @@ async def get_gps_from_ip(ip_address):
                             "source": "ip_api",
                             "accuracy": 50000
                         }
-                    else:
-                        logging.warning(f"IP-API failed: {ip_data.get('message', 'Unknown error')}")
-                else:
-                    logging.warning(f"IP-API request failed with status: {response.status}")
     
     except Exception as e:
         logging.error(f"Geolocation error for IP {ip_address}: {e}")
     
-    logging.warning(f"No valid geolocation data for IP: {ip_address}")
     return {"latitude": None, "longitude": None, "source": None, "accuracy": None}
 
 async def handle_data(request):
@@ -1067,8 +1059,9 @@ async def handle_data(request):
             shared_state["operational_data"]["vpn_info"] = await check_vpn(client_ip)
 
             if status == "arduino_ready":
-                if shared_state["device_state"] != "ready" and set_device_state("ready"):
-                    logging.info(f"Arduino ready from {client_ip}")
+                with state_lock:
+                    if shared_state["device_state"] != "ready" and set_device_state("ready"):  # Prevent ready -> ready
+                        logging.info(f"Arduino ready from {client_ip}")
                 return web.json_response({
                     "status": "ready",
                     "state": shared_state["device_state"],
@@ -1079,7 +1072,7 @@ async def handle_data(request):
                 response_data = {
                     "status": "waiting",
                     "state": shared_state["device_state"],
-                    "timestamp": datetime.datetime.now().isoformat()
+                    "timestamp": datetime.now().isoformat()  # Fixed datetime usage
                 }
                 if get_auth_status():
                     response_data.update({
@@ -1087,25 +1080,38 @@ async def handle_data(request):
                         "code": shared_state["auth_data"]["code"],
                         "runtime": shared_state["auth_data"]["runtime"]
                     })
+                elif shared_state["device_state"] == "waiting" and shared_state["auth_data"]["code"] is None:
+                    response_data.update({
+                        "status": "yes_no",
+                        "runtime": shared_state["auth_data"]["runtime"]
+                    })
                 return web.json_response(response_data)
 
             elif status == "data":
-                # Update operational data
                 with data_lock:
                     for field in ["temperature", "humidity", "speed", "remaining"]:
                         if field in post_data:
                             shared_state["operational_data"][field] = post_data[field]
                             update_operational_data(field, post_data[field])
                     
-                    timestamp = datetime.now().strftime("%H:%M:%S")  # Corrected line
+                    timestamp = datetime.now().strftime("%H:%M:%S")  # Fixed datetime usage
                     update_operational_data("timestamps", timestamp)
                     
-                    # GPS handling
                     if not shared_state["operational_data"]["gps"]["latitude"]:
                         gps_data = await get_gps_from_ip(client_ip)
                         shared_state["operational_data"]["gps"].update(gps_data)
 
                 return web.json_response({"status": "data_received"})
+
+            elif status == "start":
+                if set_device_state("running"):
+                    return web.json_response({"status": "start", "state": "running"})
+                return web.json_response({"error": "Invalid state for start"}, status=400)
+
+            elif status == "stopped":
+                if set_device_state("stopped"):
+                    return web.json_response({"status": "stopped", "state": "stopped"})
+                return web.json_response({"error": "Invalid state for stop"}, status=400)
 
             else:
                 logging.warning(f"Unknown status: {status}")
@@ -1115,6 +1121,7 @@ async def handle_data(request):
             with data_lock:
                 response_data = {
                     "state": shared_state["device_state"],
+                    "data_received": bool(shared_state["operational_data"]["history"]["timestamps"]),
                     **shared_state["operational_data"],
                     "auth_valid": get_auth_status(),
                     "auth_expires": shared_state["auth_data"]["expires"].isoformat() if shared_state["auth_data"]["expires"] else None
@@ -1129,34 +1136,34 @@ async def handle_setup(request):
     try:
         post_data = await request.json()
         runtime = post_data.get("runtime")
-        speed = post_data.get("speed")
+        speed = post_data.get("speed", 0)
 
         if not (isinstance(runtime, int) and runtime > 0):
             return web.json_response({"error": "invalid_runtime"}, status=400)
         
-        if not (0 <= speed <= 100):
+        if not (isinstance(speed, int) and 0 <= speed <= 100):
             return web.json_response({"error": "invalid_speed"}, status=400)
 
-        if "authCode" in post_data:
-            auth_code = post_data.get("authCode")
-            if VALID_AUTH_CODE_MIN <= auth_code <= VALID_AUTH_CODE_MAX:
-                with state_lock:
-                    shared_state["auth_data"]["code"] = auth_code
-                    shared_state["auth_data"]["runtime"] = runtime
-                    shared_state["auth_data"]["expires"] = datetime.now() + timedelta(minutes=AUTH_TIMEOUT_MINUTES)  # Corrected line
-                set_device_state("waiting")
-                return web.json_response({"status": "waiting"})
-            return web.json_response({"error": "invalid_code"}, status=400)
+        with state_lock:
+            if shared_state["device_state"] != "ready":
+                return web.json_response({"error": "Device not ready"}, status=400)
 
-        elif post_data.get("authMethod") == "yesno":
-            with state_lock:
+            if "authCode" in post_data:
+                auth_code = post_data.get("authCode")
+                if not (VALID_AUTH_CODE_MIN <= auth_code <= VALID_AUTH_CODE_MAX):
+                    return web.json_response({"error": "invalid_code"}, status=400)
+                shared_state["auth_data"]["code"] = auth_code
+            else:
                 shared_state["auth_data"]["code"] = None
-                shared_state["auth_data"]["runtime"] = runtime
-                shared_state["auth_data"]["expires"] = datetime.now() + timedelta(minutes=AUTH_TIMEOUT_MINUTES)
-            set_device_state("waiting")
-            return web.json_response({"status": "waiting"})
 
-        return web.json_response({"error": "invalid_request"}, status=400)
+            shared_state["auth_data"]["runtime"] = runtime
+            shared_state["auth_data"]["expires"] = datetime.now() + timedelta(minutes=AUTH_TIMEOUT_MINUTES)  # Fixed datetime usage
+            shared_state["operational_data"]["speed"] = speed
+
+            if set_device_state("waiting"):
+                return web.json_response({"status": "waiting"})
+            return web.json_response({"error": "State transition failed"}, status=500)
+
     except Exception as e:
         logging.error(f"Setup error: {str(e)}")
         return web.json_response({"error": "server_error"}, status=500)
@@ -1180,28 +1187,26 @@ async def handle_yesno(request):
         confirm = post_data.get("confirm", False)
         
         with state_lock:
-            current_state = shared_state["device_state"]
-            if current_state == "waiting" and confirm:
+            if shared_state["device_state"] == "waiting" and confirm:
                 if set_device_state("running"):
-                    # Update any necessary data here
                     return web.json_response({"status": "start", "state": "running"})
-            return web.json_response({"status": "waiting", "state": current_state})
+            return web.json_response({"status": "waiting", "state": shared_state["device_state"]})
     except Exception as e:
         logging.error(f"Error in Yes/No handling: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_stop(request):
     try:
-        if set_device_state("restarting"):
-            logging.info("Sending restart command")
-            return web.json_response({"status": "restart", "state": "restarting"})
-        return web.json_response({"error": "Invalid state transition"}, status=400)
+        with state_lock:
+            if set_device_state("restarting"):
+                logging.info("Sending restart command")
+                return web.json_response({"status": "restart", "state": "restarting"})
+            return web.json_response({"error": "Invalid state transition"}, status=400)
     except Exception as e:
         logging.error(f"Stop error: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_speed(request):
-    global device_state
     try:
         if request.method == "POST":
             post_data = await request.json()
@@ -1209,46 +1214,53 @@ async def handle_speed(request):
             if not isinstance(speed, int) or speed < 0 or speed > 100:
                 return web.json_response({"error": "Invalid speed"}, status=400)
             
-            if device_state == "running":
-                logging.info(f"Sending speed {speed} to Arduino")
-                data["speed"] = speed  # Update server-side speed
-                return web.json_response({"status": "speed_set", "speed": speed})
-            elif post_data.get("status") == "data":
-                data["speed"] = speed
-                history["speed"].append(speed)
-                history["speed"] = history["speed"][-MAX_HISTORY:]
-                logging.info(f"Received speed update from Arduino: {speed}")
-                return web.json_response({"status": "speed_received"})
-            return web.json_response({"status": device_state})
-        return web.json_response({"speed": data["speed"]})
+            with data_lock:
+                if shared_state["device_state"] == "running":
+                    shared_state["operational_data"]["speed"] = speed
+                    update_operational_data("speed", speed)
+                    logging.info(f"Speed updated to {speed}")
+                    return web.json_response({"status": "speed_set", "speed": speed})
+                return web.json_response({"error": "Device not running"}, status=400)
+        with data_lock:
+            return web.json_response({"speed": shared_state["operational_data"]["speed"]})
     except Exception as e:
         logging.error(f"Error handling speed: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_reset(request):
-    global device_state, session_data, auth_code, runtime, data, history, data_received, gps_coords, vpn_info
     try:
-        device_state = "ready"
-        session_data = []
-        auth_code = None
-        runtime = None
-        data = {"temperature": 0, "humidity": 0, "speed": 0, "remaining": 0}
-        history = {"temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []}
-        data_received = False
-        gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": None}
-        vpn_info = {"is_vpn": False, "confidence": 0, "details": "No data yet"}
-        logging.info("Session reset initiated")
-        return web.json_response({"status": "reset", "state": device_state})
+        with state_lock, data_lock:
+            shared_state["device_state"] = "ready"
+            shared_state["session_data"] = []
+            shared_state["auth_data"]["code"] = None
+            shared_state["auth_data"]["runtime"] = None
+            shared_state["auth_data"]["expires"] = None
+            shared_state["operational_data"]["temperature"] = 0
+            shared_state["operational_data"]["humidity"] = 0
+            shared_state["operational_data"]["speed"] = 0
+            shared_state["operational_data"]["remaining"] = 0
+            shared_state["operational_data"]["history"] = {
+                "temperature": [], "humidity": [], "speed": [], "remaining": [], "timestamps": []
+            }
+            shared_state["operational_data"]["gps"] = {
+                "latitude": None, "longitude": None, "source": None, "accuracy": None
+            }
+            shared_state["operational_data"]["vpn_info"] = {
+                "is_vpn": False, "confidence": 0, "details": "No data yet"
+            }
+            logging.info("Session reset initiated")
+        return web.json_response({"status": "reset", "state": "ready"})
     except Exception as e:
         logging.error(f"Error resetting session: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 async def handle_download_pdf(request):
     try:
-        if not session_data:
-            return web.json_response({"error": "No session data available"}, status=400)
+        with data_lock:
+            if not shared_state["operational_data"]["history"]["timestamps"]:
+                return web.json_response({"error": "No session data available"}, status=400)
         
-        filename = generate_pdf(session_data)
+        filename = generate_pdf(shared_state["operational_data"]["history"])
         with open(filename, 'rb') as f:
             pdf_content = f.read()
         
@@ -1266,33 +1278,34 @@ async def handle_download_pdf(request):
         logging.error(f"Error generating PDF: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
-
-def generate_pdf(session_data):
-    filename = f"aerospin_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+def generate_pdf(history_data):
+    filename = f"aerospin_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"  # Fixed datetime usage
     doc = SimpleDocTemplate(filename, pagesize=letter)
     styles = getSampleStyleSheet()
     elements = []
 
     elements.append(Paragraph("Aerospin Session Report", styles['Title']))
-    elements.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
-    if gps_coords["latitude"] and gps_coords["longitude"]:
+    elements.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))  # Fixed datetime usage
+    if shared_state["operational_data"]["gps"]["latitude"]:
         elements.append(Paragraph(
-            f"Device Location: Lat {gps_coords['latitude']:.6f}, Lon {gps_coords['longitude']:.6f} "
-            f"(Source: {gps_coords['source']}, Accuracy: {gps_coords['accuracy']}m)",
+            f"Device Location: Lat {shared_state['operational_data']['gps']['latitude']:.6f}, "
+            f"Lon {shared_state['operational_data']['gps']['longitude']:.6f} "
+            f"(Source: {shared_state['operational_data']['gps']['source']}, "
+            f"Accuracy: {shared_state['operational_data']['gps']['accuracy']}m)",
             styles['Normal']
         ))
     elements.append(Spacer(1, 12))
 
-    if not session_data:
+    if not history_data["timestamps"]:
         elements.append(Paragraph("No data collected during this session", styles['Normal']))
         doc.build(elements)
         return filename
 
-    timestamps = [entry["timestamp"] for entry in session_data]
-    temperatures = [entry["temperature"] for entry in session_data]
-    humidities = [entry["humidity"] for entry in session_data]
-    speeds = [entry["speed"] for entry in session_data]
-    remainings = [entry["remaining"] for entry in session_data]
+    timestamps = history_data["timestamps"]
+    temperatures = history_data["temperature"]
+    humidities = history_data["humidity"]
+    speeds = history_data["speed"]
+    remainings = history_data["remaining"]
 
     summary_data = [
         ["Metric", "Minimum", "Maximum", "Average"],
@@ -1359,15 +1372,15 @@ def generate_pdf(session_data):
     plt.close()
 
     table_data = [["Timestamp", "Temperature (°C)", "Humidity (%)", "Speed (%)", "Time Remaining (s)", "Latitude", "Longitude"]]
-    for entry in session_data:
+    for i in range(len(timestamps)):
         table_data.append([
-            entry["timestamp"],
-            f"{entry['temperature']:.1f}",
-            f"{entry['humidity']:.1f}",
-            f"{entry['speed']}",
-            f"{entry['remaining']}",
-            f"{entry.get('latitude', 'N/A'):.6f}" if entry.get('latitude') else "N/A",
-            f"{entry.get('longitude', 'N/A'):.6f}" if entry.get('longitude') else "N/A"
+            timestamps[i],
+            f"{temperatures[i]:.1f}",
+            f"{humidities[i]:.1f}",
+            f"{speeds[i]}",
+            f"{remainings[i]}",
+            f"{shared_state['operational_data']['gps']['latitude']:.6f}" if shared_state['operational_data']['gps']['latitude'] else "N/A",
+            f"{shared_state['operational_data']['gps']['longitude']:.6f}" if shared_state['operational_data']['gps']['longitude'] else "N/A"
         ])
 
     table = Table(table_data)
@@ -1397,7 +1410,6 @@ async def handle_root(request):
         charset='utf-8'
     )
 
-
 async def init_app():
     app = web.Application(middlewares=[cors_middleware, logging_middleware])
     app.router.add_get('/', handle_root)
@@ -1414,5 +1426,4 @@ async def init_app():
 if __name__ == "__main__":
     logging.info(f"Starting server on port {PORT}")
     web.run_app(init_app(), host="0.0.0.0", port=PORT)
-
 
