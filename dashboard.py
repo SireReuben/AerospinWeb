@@ -40,8 +40,97 @@ runtime = None
 gps_coords = {"latitude": None, "longitude": None, "source": None, "accuracy": None}
 vpn_cache = TTLCache(maxsize=100, ttl=300)
 vpn_info = {"is_vpn": False, "confidence": 0, "details": "No data yet"}
-pending_auth = False
 
+async def check_vpn(ip_address):
+    if ip_address in vpn_cache:
+        logging.debug(f"VPN status from cache for {ip_address}")
+        return vpn_cache[ip_address]
+    
+    vpn_indicators = []
+    confidence_score = 0
+    
+    try:
+        async with ClientSession() as session:
+            url = f"http://ip-api.com/json/{ip_address}?fields=status,message,proxy,hosting,org"
+            async with session.get(url, timeout=5) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get("status") == "success":
+                        if data.get("proxy", False):
+                            vpn_indicators.append("Proxy detected")
+                            confidence_score += 40
+                        if data.get("hosting", False):
+                            vpn_indicators.append("Hosting provider")
+                            confidence_score += 30
+                        org = data.get("org", "").lower()
+                        if any(keyword in org for keyword in ["vpn", "proxy", "cloud", "hosting"]):
+                            vpn_indicators.append(f"Org: {org}")
+                            confidence_score += 20
+
+        is_vpn = confidence_score >= 50
+        details = "; ".join(vpn_indicators) if vpn_indicators else "No VPN indicators"
+        vpn_info = {
+            "is_vpn": is_vpn,
+            "confidence": min(confidence_score, 100),
+            "details": f"{details} (Note: Detection is approximate)"
+        }
+        
+        vpn_cache[ip_address] = vpn_info
+        logging.info(f"VPN check for {ip_address}: {vpn_info}")
+        return vpn_info
+    except Exception as e:
+        logging.error(f"VPN check failed for {ip_address}: {e}")
+        vpn_info = {"is_vpn": False, "confidence": 0, "details": f"Check failed: {str(e)}"}
+        vpn_cache[ip_address] = vpn_info
+        return vpn_info
+
+async def get_gps_from_ip(ip_address):
+    logging.debug(f"Attempting IP geolocation for: {ip_address}")
+    try:
+        async with ClientSession() as session:
+            # Google Geolocation API
+            url = f"https://www.googleapis.com/geolocation/v1/geolocate?key={GOOGLE_API_KEY}"
+            payload = {"considerIp": True}
+            async with session.post(url, json=payload) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    accuracy = data.get("accuracy", 0)
+                    logging.info(f"Google Geolocation response: {data}")
+                    if accuracy < 50000:
+                        return {
+                            "latitude": data["location"]["lat"],
+                            "longitude": data["location"]["lng"],
+                            "source": "google_geolocation",
+                            "accuracy": accuracy
+                        }
+                    else:
+                        logging.debug(f"Google accuracy too low: {accuracy}")
+
+            # Fallback to ip-api.com
+            ip_url = f"http://ip-api.com/json/{ip_address}?fields=status,message,lat,lon"
+            async with session.get(ip_url) as response:
+                if response.status == 200:
+                    ip_data = await response.json()
+                    logging.info(f"IP-API response: {ip_data}")
+                    if ip_data.get("status") == "success":
+                        return {
+                            "latitude": ip_data["lat"],
+                            "longitude": ip_data["lon"],
+                            "source": "ip_api",
+                            "accuracy": 50000
+                        }
+                    else:
+                        logging.warning(f"IP-API failed: {ip_data.get('message', 'Unknown error')}")
+                else:
+                    logging.warning(f"IP-API request failed with status: {response.status}")
+    
+    except Exception as e:
+        logging.error(f"Geolocation error for IP {ip_address}: {e}")
+    
+    logging.warning(f"No valid geolocation data for IP: {ip_address}")
+    return {"latitude": None, "longitude": None, "source": None, "accuracy": None}
+
+# HTML content remains unchanged; omitted for brevity but should be identical to your original
 HTML_CONTENT = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -388,7 +477,15 @@ HTML_CONTENT = '''
                 <div class="col-md-4">
                     <div class="control-card">
                         <h4 class="mb-3">Control Panel</h4>
-                        <button id="setupButton" class="btn btn-primary w-100">Setup System</button>
+                        <div class="mb-3">
+                            <label for="authCode" class="form-label">Auth Code (100-999)</label>
+                            <input type="number" id="authCode" min="100" max="999" class="form-control" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="runtime" class="form-label">Runtime (seconds)</label>
+                            <input type="number" id="runtime" min="1" class="form-control" required>
+                        </div>
+                        <button id="submitSetup" class="btn btn-primary w-100">Configure System</button>
                         <button id="stopButton" class="btn btn-danger w-100 mt-2" style="display: none;">
                             <i class="ri-stop-circle-line"></i> Stop System
                         </button>
@@ -409,85 +506,6 @@ HTML_CONTENT = '''
             </div>
         </div>
     </div>
-
-    <!-- Speed Control Modal -->
-    <div class="modal fade" id="speedModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content" style="background: var(--card-bg); border: 1px solid var(--border);">
-                <div class="modal-header" style="border-bottom: 1px solid var(--border);">
-                    <h5 class="modal-title">Adjust Speed</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: invert(1);"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label for="speedSlider" class="form-label">Current Speed: <span id="speedValue">0</span>%</label>
-                        <input type="range" class="form-range" min="0" max="100" step="1" id="speedSlider">
-                    </div>
-                    <div class="d-flex justify-content-between">
-                        <button id="decreaseSpeed" class="btn btn-primary"><i class="ri-subtract-line"></i> 5%</button>
-                        <button id="increaseSpeed" class="btn btn-primary"><i class="ri-add-line"></i> 5%</button>
-                    </div>
-                </div>
-                <div class="modal-footer" style="border-top: 1px solid var(--border);">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    <button type="button" class="btn btn-primary" id="saveSpeed">Save Changes</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Authentication Modal -->
-    <div class="modal fade" id="authModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content" style="background: var(--card-bg); border: 1px solid var(--border);">
-                <div class="modal-header" style="border-bottom: 1px solid var(--border);">
-                    <h5 class="modal-title">Authentication Method</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: invert(1);"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="authMethod" id="codeAuth" checked>
-                            <label class="form-check-label" for="codeAuth">
-                                Code Authentication
-                            </label>
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="authMethod" id="buttonAuth">
-                            <label class="form-check-label" for="buttonAuth">
-                                Button Authentication
-                            </label>
-                        </div>
-                    </div>
-                    <div id="codeAuthFields">
-                        <div class="mb-3">
-                            <label for="authCode" class="form-label">Auth Code (100-999)</label>
-                            <input type="number" id="authCode" min="100" max="999" class="form-control" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="runtime" class="form-label">Runtime (seconds)</label>
-                            <input type="number" id="runtime" min="1" class="form-control" required>
-                        </div>
-                    </div>
-                    <div id="buttonAuthFields" style="display: none;">
-                        <div class="alert alert-info">
-                            <i class="ri-information-line"></i> This will send a request to the device for approval
-                        </div>
-                        <div class="mb-3">
-                            <label for="buttonRuntime" class="form-label">Runtime (seconds)</label>
-                            <input type="number" id="buttonRuntime" min="1" class="form-control" required>
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer" style="border-top: 1px solid var(--border);">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-primary" id="submitAuth">Authenticate</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         let tempChart, humidChart, speedChart, remainingChart;
         let map, marker;
@@ -596,7 +614,7 @@ HTML_CONTENT = '''
                 center: { lat: 20, lng: 54 },
                 zoom: 2,
                 mapTypeId: 'roadmap',
-                mapId: '67926741dcbb2036'
+                mapId: '67926741dcbb2036'  // Replace with your Vector Map ID from Google Cloud Console
             });
             isMapInitialized = true;
             console.log("Map initialized successfully");
@@ -657,171 +675,101 @@ HTML_CONTENT = '''
         document.addEventListener('DOMContentLoaded', function() {
             initCharts();
             waitForGoogleMaps();
-            
-            // Speed Control
-            const speedModal = new bootstrap.Modal(document.getElementById('speedModal'));
-            const speedSlider = document.getElementById('speedSlider');
-            const speedValue = document.getElementById('speedValue');
-            const saveSpeedBtn = document.getElementById('saveSpeed');
-            const increaseBtn = document.getElementById('increaseSpeed');
-            const decreaseBtn = document.getElementById('decreaseSpeed');
-            
-            document.getElementById('speed').addEventListener('click', function() {
-                speedSlider.value = parseInt(this.textContent);
-                speedValue.textContent = speedSlider.value;
-                speedModal.show();
-            });
-            
-            speedSlider.addEventListener('input', function() {
-                speedValue.textContent = this.value;
-            });
-            
-            increaseBtn.addEventListener('click', function() {
-                speedSlider.value = Math.min(100, parseInt(speedSlider.value) + 5);
-                speedValue.textContent = speedSlider.value;
-            });
-            
-            decreaseBtn.addEventListener('click', function() {
-                speedSlider.value = Math.max(0, parseInt(speedSlider.value) - 5);
-                speedValue.textContent = speedSlider.value;
-            });
-            
-            saveSpeedBtn.addEventListener('click', async function() {
-                const newSpeed = parseInt(speedSlider.value);
-                try {
-                    const response = await fetch('/speed', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ speed: newSpeed })
-                    });
-                    
-                    if (response.ok) {
-                        speedModal.hide();
-                        fetchData();
-                    } else {
-                        alert('Failed to update speed');
-                    }
-                } catch (error) {
-                    console.error('Error updating speed:', error);
-                    alert('Error updating speed');
-                }
-            });
-            
-            // Authentication
-            const authModal = new bootstrap.Modal(document.getElementById('authModal'));
-            const codeAuth = document.getElementById('codeAuth');
-            const buttonAuth = document.getElementById('buttonAuth');
-            const codeAuthFields = document.getElementById('codeAuthFields');
-            const buttonAuthFields = document.getElementById('buttonAuthFields');
-            const submitAuthBtn = document.getElementById('submitAuth');
-            
-            document.getElementById('setupButton').addEventListener('click', function() {
-                authModal.show();
-            });
-            
-            codeAuth.addEventListener('change', function() {
-                if (this.checked) {
-                    codeAuthFields.style.display = 'block';
-                    buttonAuthFields.style.display = 'none';
-                }
-            });
-            
-            buttonAuth.addEventListener('change', function() {
-                if (this.checked) {
-                    codeAuthFields.style.display = 'none';
-                    buttonAuthFields.style.display = 'block';
-                }
-            });
-            
-            submitAuthBtn.addEventListener('click', async function() {
-                const useButtonAuth = buttonAuth.checked;
-                
-                if (useButtonAuth) {
-                    const runtime = document.getElementById('buttonRuntime').value;
-                    if (!runtime || runtime < 1) {
-                        alert('Please enter a valid runtime');
-                        return;
-                    }
-                    
-                    try {
-                        const response = await fetch('/auth/request', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ 
-                                type: 'button',
-                                runtime: parseInt(runtime)
-                            })
-                        });
-                        
-                        if (response.ok) {
-                            authModal.hide();
-                            updateSystemStatus('Waiting for device confirmation');
-                            const authCheck = setInterval(async () => {
-                                const statusResponse = await fetch('/data');
-                                const statusData = await statusResponse.json();
-                                if (statusData.state === 'running') {
-                                    clearInterval(authCheck);
-                                    fetchData();
-                                } else if (statusData.state === 'ready') {
-                                    clearInterval(authCheck);
-                                    alert('Authentication rejected by device');
-                                    fetchData();
-                                }
-                            }, 1000);
-                        } else {
-                            alert('Failed to send authentication request');
-                        }
-                    } catch (error) {
-                        console.error('Error with button auth:', error);
-                        alert('Error with button authentication');
-                    }
-                } else {
-                    const authCode = document.getElementById('authCode').value;
-                    const runtime = document.getElementById('runtime').value;
-                    
-                    if (!authCode || authCode < 100 || authCode > 999) {
-                        alert('Auth code must be between 100 and 999');
-                        return;
-                    }
-                    
-                    if (!runtime || runtime < 1) {
-                        alert('Runtime must be a positive number');
-                        return;
-                    }
-                    
-                    try {
-                        const response = await fetch('/setup', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ 
-                                type: 'code',
-                                authCode: parseInt(authCode),
-                                runtime: parseInt(runtime)
-                            })
-                        });
-                        
-                        if (response.ok) {
-                            authModal.hide();
-                            updateSystemStatus('Waiting');
-                            document.getElementById('setupButton').disabled = true;
-                            fetchData();
-                        } else {
-                            alert('Setup failed');
-                        }
-                    } catch (error) {
-                        console.error('Error with code auth:', error);
-                        alert('Error with code authentication');
-                    }
-                }
-            });
-            
-            // Other controls
+            document.getElementById('submitSetup').addEventListener('click', submitSetup);
             document.getElementById('stopButton').addEventListener('click', stopSystem);
             document.getElementById('downloadPdf').addEventListener('click', downloadPdf);
             document.getElementById('startNewSession').addEventListener('click', startNewSession);
-            
             setInterval(fetchData, 1000);
         });
+
+        async function submitSetup() {
+            const authCode = parseInt(document.getElementById('authCode').value);
+            const runtime = parseInt(document.getElementById('runtime').value);
+            
+            if (isNaN(authCode) || authCode < 100 || authCode > 999) {
+                alert("Auth code must be between 100 and 999.");
+                return;
+            }
+            
+            if (isNaN(runtime) || runtime < 1) {
+                alert("Runtime must be a positive number.");
+                return;
+            }
+            
+            try {
+                const response = await fetch('/setup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ authCode: authCode, runtime: runtime })
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'waiting') {
+                    updateSystemStatus('Waiting');
+                    document.getElementById('submitSetup').disabled = true;
+                    fetchData();
+                } else {
+                    alert("Setup failed: " + result.error);
+                }
+            } catch (error) {
+                console.error('Error submitting setup:', error);
+                alert('Failed to submit setup.');
+            }
+        }
+
+        async function stopSystem() {
+            try {
+                const response = await fetch('/stop', {
+                    method: 'POST'
+                });
+                if (response.ok) {
+                    window.location.reload();
+                }
+            } catch (error) {
+                console.error('Error stopping system:', error);
+                alert('Failed to stop system.');
+            }
+        }
+
+        async function downloadPdf() {
+            try {
+                const response = await fetch('/download_pdf');
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `aerospin_report_${new Date().toISOString().replace(/[:.]/g, '-')}.pdf`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    window.URL.revokeObjectURL(url);
+                } else {
+                    alert('No report available.');
+                }
+            } catch (error) {
+                console.error('Error downloading PDF:', error);
+                alert('Failed to download report.');
+            }
+        }
+
+        async function startNewSession() {
+            try {
+                const response = await fetch('/reset', {
+                    method: 'POST'
+                });
+                if (response.ok) {
+                    document.getElementById('submitSetup').disabled = false;
+                    fetchData();
+                } else {
+                    alert('Failed to start new session.');
+                }
+            } catch (error) {
+                console.error('Error starting new session:', error);
+                alert('Failed to start new session.');
+            }
+        }
 
         async function fetchData() {
             try {
@@ -894,151 +842,10 @@ HTML_CONTENT = '''
         }
         fetchData.gpsWarned = false;
 
-        async function stopSystem() {
-            try {
-                const response = await fetch('/stop', {
-                    method: 'POST'
-                });
-                if (response.ok) {
-                    window.location.reload();
-                }
-            } catch (error) {
-                console.error('Error stopping system:', error);
-                alert('Failed to stop system.');
-            }
-        }
-
-        async function downloadPdf() {
-            try {
-                const response = await fetch('/download_pdf');
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `aerospin_report_${new Date().toISOString().replace(/[:.]/g, '-')}.pdf`;
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
-                    window.URL.revokeObjectURL(url);
-                } else {
-                    alert('No report available.');
-                }
-            } catch (error) {
-                console.error('Error downloading PDF:', error);
-                alert('Failed to download report.');
-            }
-        }
-
-        async function startNewSession() {
-            try {
-                const response = await fetch('/reset', {
-                    method: 'POST'
-                });
-                if (response.ok) {
-                    document.getElementById('setupButton').disabled = false;
-                    fetchData();
-                } else {
-                    alert('Failed to start new session.');
-                }
-            } catch (error) {
-                console.error('Error starting new session:', error);
-                alert('Failed to start new session.');
-            }
-        }
     </script>
 </body>
 </html>
 '''
-
-async def check_vpn(ip_address):
-    if ip_address in vpn_cache:
-        logging.debug(f"VPN status from cache for {ip_address}")
-        return vpn_cache[ip_address]
-    
-    vpn_indicators = []
-    confidence_score = 0
-    
-    try:
-        async with ClientSession() as session:
-            url = f"http://ip-api.com/json/{ip_address}?fields=status,message,proxy,hosting,org"
-            async with session.get(url, timeout=5) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    if data.get("status") == "success":
-                        if data.get("proxy", False):
-                            vpn_indicators.append("Proxy detected")
-                            confidence_score += 40
-                        if data.get("hosting", False):
-                            vpn_indicators.append("Hosting provider")
-                            confidence_score += 30
-                        org = data.get("org", "").lower()
-                        if any(keyword in org for keyword in ["vpn", "proxy", "cloud", "hosting"]):
-                            vpn_indicators.append(f"Org: {org}")
-                            confidence_score += 20
-
-        is_vpn = confidence_score >= 50
-        details = "; ".join(vpn_indicators) if vpn_indicators else "No VPN indicators"
-        vpn_info = {
-            "is_vpn": is_vpn,
-            "confidence": min(confidence_score, 100),
-            "details": f"{details} (Note: Detection is approximate)"
-        }
-        
-        vpn_cache[ip_address] = vpn_info
-        logging.info(f"VPN check for {ip_address}: {vpn_info}")
-        return vpn_info
-    except Exception as e:
-        logging.error(f"VPN check failed for {ip_address}: {e}")
-        vpn_info = {"is_vpn": False, "confidence": 0, "details": f"Check failed: {str(e)}"}
-        vpn_cache[ip_address] = vpn_info
-        return vpn_info
-
-async def get_gps_from_ip(ip_address):
-    logging.debug(f"Attempting IP geolocation for: {ip_address}")
-    try:
-        async with ClientSession() as session:
-            # Google Geolocation API
-            url = f"https://www.googleapis.com/geolocation/v1/geolocate?key={GOOGLE_API_KEY}"
-            payload = {"considerIp": True}
-            async with session.post(url, json=payload) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    accuracy = data.get("accuracy", 0)
-                    logging.info(f"Google Geolocation response: {data}")
-                    if accuracy < 50000:
-                        return {
-                            "latitude": data["location"]["lat"],
-                            "longitude": data["location"]["lng"],
-                            "source": "google_geolocation",
-                            "accuracy": accuracy
-                        }
-                    else:
-                        logging.debug(f"Google accuracy too low: {accuracy}")
-
-            # Fallback to ip-api.com
-            ip_url = f"http://ip-api.com/json/{ip_address}?fields=status,message,lat,lon"
-            async with session.get(ip_url) as response:
-                if response.status == 200:
-                    ip_data = await response.json()
-                    logging.info(f"IP-API response: {ip_data}")
-                    if ip_data.get("status") == "success":
-                        return {
-                            "latitude": ip_data["lat"],
-                            "longitude": ip_data["lon"],
-                            "source": "ip_api",
-                            "accuracy": 50000
-                        }
-                    else:
-                        logging.warning(f"IP-API failed: {ip_data.get('message', 'Unknown error')}")
-                else:
-                    logging.warning(f"IP-API request failed with status: {response.status}")
-    
-    except Exception as e:
-        logging.error(f"Geolocation error for IP {ip_address}: {e}")
-    
-    logging.warning(f"No valid geolocation data for IP: {ip_address}")
-    return {"latitude": None, "longitude": None, "source": None, "accuracy": None}
 
 def generate_pdf(session_data):
     filename = f"aerospin_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
@@ -1398,130 +1205,6 @@ async def handle_pdf_download(request):
         logging.error(f"Error serving PDF: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
-async def handle_speed(request):
-    global data, history
-    
-    try:
-        post_data = await request.json()
-        new_speed = post_data.get("speed")
-        
-        if new_speed is None or not isinstance(new_speed, int) or new_speed < 0 or new_speed > 100:
-            return web.json_response(
-                {"error": "Invalid speed value (0-100)"}, 
-                status=400,
-                headers={"Access-Control-Allow-Origin": "*"}
-            )
-            
-        data["speed"] = new_speed
-        
-        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-        history["speed"].append(new_speed)
-        history["speed"] = history["speed"][-MAX_HISTORY:]
-        history["timestamps"].append(timestamp)
-        history["timestamps"] = history["timestamps"][-MAX_HISTORY:]
-        
-        logging.info(f"Speed updated to {new_speed}%")
-        return web.json_response(
-            {"status": "success", "speed": new_speed},
-            headers={"Access-Control-Allow-Origin": "*"}
-        )
-        
-    except json.JSONDecodeError:
-        return web.json_response(
-            {"error": "Invalid JSON"}, 
-            status=400,
-            headers={"Access-Control-Allow-Origin": "*"}
-        )
-
-async def handle_auth_request(request):
-    global device_state, pending_auth
-    
-    try:
-        post_data = await request.json()
-        request_type = post_data.get("type")
-        
-        if request_type == "button":
-            device_state = "waiting"
-            pending_auth = True
-            return web.json_response({
-                "status": "auth_pending",
-                "message": "Please confirm on device",
-                "state": device_state
-            })
-            
-        elif request_type == "code":
-            auth_code = post_data.get("authCode")
-            runtime = post_data.get("runtime")
-            
-            if not (isinstance(auth_code, int) and VALID_AUTH_CODE_MIN <= auth_code <= VALID_AUTH_CODE_MAX):
-                return web.json_response(
-                    {"error": f"Auth code must be between {VALID_AUTH_CODE_MIN} and {VALID_AUTH_CODE_MAX}"},
-                    status=400
-                )
-                
-            device_state = "waiting"
-            return web.json_response({
-                "status": "auth_code",
-                "code": auth_code,
-                "runtime": runtime,
-                "state": device_state
-            })
-            
-        else:
-            return web.json_response(
-                {"error": "Invalid authentication type"},
-                status=400
-            )
-            
-    except Exception as e:
-        logging.error(f"Error in auth request: {e}")
-        return web.json_response(
-            {"error": str(e)},
-            status=500
-        )
-
-async def handle_auth_response(request):
-    global device_state, pending_auth, runtime
-    
-    try:
-        post_data = await request.json()
-        response = post_data.get("response")
-        
-        if response == "confirmed":
-            runtime = post_data.get("runtime")
-            if runtime and isinstance(runtime, int) and runtime > 0:
-                device_state = "running"
-                pending_auth = False
-                return web.json_response({
-                    "status": "auth_success",
-                    "state": device_state
-                })
-            else:
-                return web.json_response({
-                    "status": "auth_failed",
-                    "error": "Invalid runtime"
-                }, status=400)
-                
-        elif response == "rejected":
-            device_state = "ready"
-            pending_auth = False
-            return web.json_response({
-                "status": "auth_rejected",
-                "state": device_state
-            })
-            
-        else:
-            return web.json_response({
-                "error": "Invalid response"
-            }, status=400)
-            
-    except Exception as e:
-        logging.error(f"Error in auth response: {e}")
-        return web.json_response(
-            {"error": str(e)},
-            status=500
-        )
-
 async def handle_root(request):
     logging.debug("Root endpoint accessed")
     return web.Response(text=HTML_CONTENT, content_type='text/html')
@@ -1534,9 +1217,6 @@ async def init_app():
     app.router.add_post('/stop', handle_stop)
     app.router.add_post('/reset', handle_reset)
     app.router.add_get('/download_pdf', handle_pdf_download)
-    app.router.add_post('/speed', handle_speed)
-    app.router.add_post('/auth/request', handle_auth_request)
-    app.router.add_post('/auth/response', handle_auth_response)
     return app
 
 async def main():
@@ -1556,3 +1236,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
