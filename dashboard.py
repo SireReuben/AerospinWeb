@@ -1067,7 +1067,7 @@ async def handle_data(request):
             shared_state["operational_data"]["vpn_info"] = await check_vpn(client_ip)
 
             if status == "arduino_ready":
-                if set_device_state("ready"):
+                if shared_state["device_state"] != "ready" and set_device_state("ready"):
                     logging.info(f"Arduino ready from {client_ip}")
                 return web.json_response({
                     "status": "ready",
