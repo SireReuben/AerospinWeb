@@ -50,7 +50,7 @@ async def check_vpn(ip_address):
     
     try:
         async with ClientSession() as session:
-            url = f"http://ip-api.com/json/{ip_address}?fields=status,proxy,hosting,org,mobile,isp"
+            url = f"https://ip-api.com/json/{ip_address}?fields=status,proxy,hosting,org,mobile,isp"
             async with session.get(url) as response:
                 if response.status == 200 and (data := await response.json()).get("status") == "success":
                     if data.get("proxy", False):
@@ -105,7 +105,7 @@ async def get_gps_from_ip(ip_address, rssi=None, mac_address=None):
                     })
 
             # ip-api.com
-            url = f"http://ip-api.com/json/{ip_address}?fields=status,lat,lon"
+            url = f"https://ip-api.com/json/{ip_address}?fields=status,lat,lon"
             async with session.get(url) as response:
                 if response.status == 200 and (data := await response.json()).get("status") == "success":
                     coords_list.append({
