@@ -43,6 +43,7 @@ vpn_info = {"is_vpn": False, "confidence": 0, "details": "No data yet"}
 
 async def check_vpn(ip_address):
     if ip_address in vpn_cache:
+        logging.debug(f"VPN status from cache for {ip_address}")
         return vpn_cache[ip_address]
     
     vpn_indicators = []
@@ -50,95 +51,84 @@ async def check_vpn(ip_address):
     
     try:
         async with ClientSession() as session:
-            url = f"https://ip-api.com/json/{ip_address}?fields=status,proxy,hosting,org,mobile,isp"
-            async with session.get(url) as response:
-                if response.status == 200 and (data := await response.json()).get("status") == "success":
-                    if data.get("proxy", False):
-                        vpn_indicators.append("Proxy detected")
-                        confidence_score += 40
-                    if data.get("hosting", False):
-                        vpn_indicators.append("Hosting provider")
-                        confidence_score += 30
-                    if data.get("mobile", False):
-                        vpn_indicators.append("Mobile network")
-                        confidence_score += 10  # Mobile IPs can be less reliable
-                    org = data.get("org", "").lower()
-                    isp = data.get("isp", "").lower()
-                    vpn_keywords = ["vpn", "proxy", "cloud", "hosting", "tunnel"]
-                    if any(keyword in org for keyword in vpn_keywords) or any(keyword in isp for keyword in vpn_keywords):
-                        vpn_indicators.append(f"Org/ISP: {org}/{isp}")
-                        confidence_score += 20
+            url = f"http://ip-api.com/json/{ip_address}?fields=status,message,proxy,hosting,org"
+            async with session.get(url, timeout=5) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get("status") == "success":
+                        if data.get("proxy", False):
+                            vpn_indicators.append("Proxy detected")
+                            confidence_score += 40
+                        if data.get("hosting", False):
+                            vpn_indicators.append("Hosting provider")
+                            confidence_score += 30
+                        org = data.get("org", "").lower()
+                        if any(keyword in org for keyword in ["vpn", "proxy", "cloud", "hosting"]):
+                            vpn_indicators.append(f"Org: {org}")
+                            confidence_score += 20
 
         is_vpn = confidence_score >= 50
         details = "; ".join(vpn_indicators) if vpn_indicators else "No VPN indicators"
         vpn_info = {
             "is_vpn": is_vpn,
             "confidence": min(confidence_score, 100),
-            "details": details
+            "details": f"{details} (Note: Detection is approximate)"
         }
+        
         vpn_cache[ip_address] = vpn_info
         logging.info(f"VPN check for {ip_address}: {vpn_info}")
         return vpn_info
     except Exception as e:
-        logging.error(f"VPN check failed: {e}")
-        return {"is_vpn": False, "confidence": 0, "details": f"Error: {str(e)}"}
+        logging.error(f"VPN check failed for {ip_address}: {e}")
+        vpn_info = {"is_vpn": False, "confidence": 0, "details": f"Check failed: {str(e)}"}
+        vpn_cache[ip_address] = vpn_info
+        return vpn_info
 
-async def get_gps_from_ip(ip_address, rssi=None, mac_address=None):
-    logging.debug(f"Geolocating IP: {ip_address}, RSSI: {rssi}, MAC: {mac_address}")
-    coords_list = []
-    
+async def get_gps_from_ip(ip_address):
+    logging.debug(f"Attempting IP geolocation for: {ip_address}")
     try:
         async with ClientSession() as session:
             # Google Geolocation API
             url = f"https://www.googleapis.com/geolocation/v1/geolocate?key={GOOGLE_API_KEY}"
             payload = {"considerIp": True}
-            if mac_address and rssi:  # Optional WiFi data if provided
-                payload["wifiAccessPoints"] = [{"macAddress": mac_address, "signalStrength": rssi}]
             async with session.post(url, json=payload) as response:
                 if response.status == 200:
                     data = await response.json()
-                    coords_list.append({
-                        "latitude": data["location"]["lat"],
-                        "longitude": data["location"]["lng"],
-                        "source": "google_geolocation",
-                        "accuracy": data.get("accuracy", 50000)
-                    })
+                    accuracy = data.get("accuracy", 0)
+                    logging.info(f"Google Geolocation response: {data}")
+                    if accuracy < 50000:
+                        return {
+                            "latitude": data["location"]["lat"],
+                            "longitude": data["location"]["lng"],
+                            "source": "google_geolocation",
+                            "accuracy": accuracy
+                        }
+                    else:
+                        logging.debug(f"Google accuracy too low: {accuracy}")
 
-            # ip-api.com
-            url = f"https://ip-api.com/json/{ip_address}?fields=status,lat,lon"
-            async with session.get(url) as response:
-                if response.status == 200 and (data := await response.json()).get("status") == "success":
-                    coords_list.append({
-                        "latitude": data["lat"],
-                        "longitude": data["lon"],
-                        "source": "ip_api",
-                        "accuracy": 50000  # Default accuracy for ip-api
-                    })
-
-            # ipstack (requires API key, uncomment if you have one)
-            # url = f"http://api.ipstack.com/{ip_address}?access_key=YOUR_IPSTACK_KEY"
-            # async with session.get(url) as response:
-            #     if response.status == 200:
-            #         data = await response.json()
-            #         coords_list.append({
-            #             "latitude": data["latitude"],
-            #             "longitude": data["longitude"],
-            #             "source": "ipstack",
-            #             "accuracy": 10000  # Adjust based on service
-            #         })
-
-        # Filter and select the best result
-        if coords_list:
-            best_result = min(coords_list, key=lambda x: x["accuracy"])
-            logging.info(f"Best geolocation for {ip_address}: {best_result}")
-            return best_result
-        else:
-            logging.warning(f"No geolocation data for {ip_address}")
-            return {"latitude": None, "longitude": None, "source": None, "accuracy": None}
-
+            # Fallback to ip-api.com
+            ip_url = f"http://ip-api.com/json/{ip_address}?fields=status,message,lat,lon"
+            async with session.get(ip_url) as response:
+                if response.status == 200:
+                    ip_data = await response.json()
+                    logging.info(f"IP-API response: {ip_data}")
+                    if ip_data.get("status") == "success":
+                        return {
+                            "latitude": ip_data["lat"],
+                            "longitude": ip_data["lon"],
+                            "source": "ip_api",
+                            "accuracy": 50000
+                        }
+                    else:
+                        logging.warning(f"IP-API failed: {ip_data.get('message', 'Unknown error')}")
+                else:
+                    logging.warning(f"IP-API request failed with status: {response.status}")
+    
     except Exception as e:
-        logging.error(f"Geolocation failed for {ip_address}: {e}")
-        return {"latitude": None, "longitude": None, "source": None, "accuracy": None}
+        logging.error(f"Geolocation error for IP {ip_address}: {e}")
+    
+    logging.warning(f"No valid geolocation data for IP: {ip_address}")
+    return {"latitude": None, "longitude": None, "source": None, "accuracy": None}
 
 # HTML content remains unchanged; omitted for brevity but should be identical to your original
 HTML_CONTENT = '''
@@ -996,30 +986,21 @@ async def handle_data(request):
         try:
             post_data = await request.json()
             status = post_data.get("status")
-            # Use the public IP provided by Arduino if available, otherwise fall back to request.remote
-            public_ip = post_data.get("public_ip", "Unknown")
-            if public_ip == "Unknown":
-                public_ip = request.remote
+            # Use the public IP provided by Arduino if available
+            public_ip = post_data.get("public_ip")
+            if public_ip and public_ip != "Unknown":
+                client_ip = public_ip
+            else:
+                client_ip = request.remote
             
-            logging.debug(f"Received POST data from IP {public_ip}: {post_data}")
+            logging.debug(f"Received POST data from IP {client_ip}: {post_data}")
 
-            # Check for VPN and fetch geolocation with additional metadata
-            vpn_info = await check_vpn(public_ip)
-            rssi = post_data.get("wifi_rssi")  # WiFi signal strength from Arduino
-            mac_address = post_data.get("mac_address")  # MAC address from Arduino
-            coords = await get_gps_from_ip(public_ip, rssi, mac_address)
-            
-            # Adjust accuracy if VPN is detected
-            if vpn_info["is_vpn"] and coords["accuracy"]:
-                coords["accuracy"] *= 2  # Double the accuracy radius to reflect lower confidence
-                logging.warning(f"VPN detected for {public_ip}, reduced location confidence to {coords['accuracy']}m")
-            gps_coords = coords
+            vpn_info = await check_vpn(client_ip)
 
-            # Handle different status messages from Arduino
             if status == "arduino_ready":
                 if device_state == "disconnected":
                     device_state = "ready"
-                    logging.info(f"Arduino detected at {public_ip}, state transitioned to: {device_state}")
+                    logging.info(f"Arduino detected at {client_ip}, state transitioned to: {device_state}")
                 return web.json_response(
                     {"status": "ready", "state": device_state},
                     headers={"Access-Control-Allow-Origin": "*"}
@@ -1027,7 +1008,7 @@ async def handle_data(request):
             
             elif status == "check_auth":
                 if auth_code is not None and runtime is not None:
-                    logging.info(f"Sending auth_code: {auth_code}, runtime: {runtime} to {public_ip}")
+                    logging.info(f"Sending auth_code: {auth_code}, runtime: {runtime} to {client_ip}")
                     return web.json_response({
                         "status": "auth_code",
                         "code": auth_code,
@@ -1035,7 +1016,7 @@ async def handle_data(request):
                         "state": device_state
                     },
                     headers={"Access-Control-Allow-Origin": "*"})
-                logging.debug(f"No auth code yet for {public_ip}, state: {device_state}")
+                logging.debug(f"No auth code yet for {client_ip}, state: {device_state}")
                 return web.json_response(
                     {"status": "waiting", "state": device_state},
                     headers={"Access-Control-Allow-Origin": "*"}
@@ -1043,7 +1024,7 @@ async def handle_data(request):
             
             elif status == "start":
                 device_state = "running"
-                logging.info(f"State transitioned to: {device_state} for {public_ip}")
+                logging.info(f"State transitioned to: {device_state} for {client_ip}")
                 return web.json_response(
                     {"status": "running", "state": device_state},
                     headers={"Access-Control-Allow-Origin": "*"}
@@ -1051,20 +1032,25 @@ async def handle_data(request):
             
             elif status == "stopped":
                 device_state = "stopped"
-                logging.info(f"State transitioned to: {device_state} for {public_ip}")
+                logging.info(f"State transitioned to: {device_state} for {client_ip}")
                 return web.json_response(
                     {"status": "stopped", "state": device_state},
                     headers={"Access-Control-Allow-Origin": "*"}
                 )
             
             elif status == "data":
+                # Get coordinates using the client's public IP
+                coords = await get_gps_from_ip(client_ip)
+                gps_coords = coords
+                logging.info(f"Updated GPS coords for {client_ip}: {gps_coords}")
+
                 required_fields = ['temperature', 'humidity', 'speed', 'remaining']
                 if all(field in post_data for field in required_fields):
                     if not (isinstance(post_data["temperature"], (int, float)) and 
                             isinstance(post_data["humidity"], (int, float)) and 
                             isinstance(post_data["speed"], int) and 
                             isinstance(post_data["remaining"], int)):
-                        logging.warning(f"Invalid data types in POST data from {public_ip}")
+                        logging.warning(f"Invalid data types in POST data from {client_ip}")
                         return web.json_response(
                             {"error": "Invalid data types"}, 
                             status=400,
@@ -1073,12 +1059,10 @@ async def handle_data(request):
 
                     data_received = True
                     device_state = "running"
-                    logging.info(f"Arduino data received from {public_ip}, state transitioned to: {device_state}")
+                    logging.info(f"Arduino data received from {client_ip}, state transitioned to: {device_state}")
                     
-                    # Update sensor data
                     data.update({field: post_data[field] for field in required_fields})
                     
-                    # Record session data with timestamp and GPS coordinates
                     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
                     session_record = {
                         "timestamp": timestamp,
@@ -1087,7 +1071,6 @@ async def handle_data(request):
                     }
                     session_data.append(session_record)
                     
-                    # Update history for charts
                     for key in data:
                         history[key].append(data[key])
                         history[key] = history[key][-MAX_HISTORY:]
@@ -1106,7 +1089,7 @@ async def handle_data(request):
                         headers={"Access-Control-Allow-Origin": "*"}
                     )
                 
-                logging.warning(f"Missing fields in POST data from {public_ip}")
+                logging.warning(f"Missing fields in POST data from {client_ip}")
                 return web.json_response(
                     {"error": "Missing required fields"}, 
                     status=400,
@@ -1128,7 +1111,6 @@ async def handle_data(request):
                 headers={"Access-Control-Allow-Origin": "*"}
             )
     
-    # Handle GET requests
     logging.debug(f"GET request received from {request.remote}, current state: {device_state}")
     return web.json_response({
         "state": device_state,
